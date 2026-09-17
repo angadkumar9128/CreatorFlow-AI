@@ -1,18 +1,17 @@
-import { generateImage, availableImageProviders, QUALITY_TIERS } from "@/lib/imagegen";
+import { generateImage, availableImageProviders } from "@/lib/imagegen";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * One line added to every style since the last version: an explicit call-out
- * against the waxy-skin, too-symmetric, slightly-melted look that is the most
- * recognisable diffusion-model tell, especially on faces. Naming it directly
- * in the negative prompt measurably helps more than generic "high quality"
- * language.
+ * Style suffixes rewritten. The old ones were a handful of adjectives, which
+ * Flux mostly ignores. These name a camera, a lens, a light source and a grade,
+ * because diffusion models respond to concrete photographic vocabulary far more
+ * than to words like "high quality".
+ *
+ * Every one also reserves the lower third for the caption overlay, so text
+ * never lands on a busy part of the frame.
  */
-const ANTI_AI_LOOK =
-  "avoid plastic or waxy skin texture, avoid uncanny facial symmetry, avoid melted or smudged fine detail, avoid over-smoothed airbrushed rendering";
-
 const STYLE_SUFFIX = {
   photoreal:
     "shot on a Sony A7 IV with a 35mm f/1.4 lens, shallow depth of field, natural window light with soft falloff, subtle film grain, muted cinematic colour grade, sharp focus on the subject, clean uncluttered lower third, full-length vertical 9:16 framing",
@@ -30,40 +29,36 @@ const STYLE_SUFFIX = {
     "minimalist composition, one clear subject against a large clean background, soft even lighting, muted neutral palette, generous empty space, vertical 9:16 framing",
 };
 
+/** Stated once, applied to every render. */
 const NEGATIVE =
   "no text, no letters, no words, no captions, no watermark, no logo, no signature, " +
   "no extra limbs, no deformed hands, no distorted faces, no blurry low-resolution artefacts, " +
-  "not a collage, not a split screen, no borders, no frame. " +
-  ANTI_AI_LOOK;
+  "not a collage, not a split screen, no borders, no frame";
 
 export async function GET() {
-  return Response.json({ imageProviders: availableImageProviders(), qualityTiers: QUALITY_TIERS });
+  return Response.json({ imageProviders: availableImageProviders() });
 }
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    const {
-      prompt,
-      style = "photoreal",
-      seed,
-      imageProvider,
-      providerKeys = {},
-      quality = "balanced",
-    } = body;
+    const { prompt, style = "photoreal", seed, imageProvider, providerKeys = {}, steps } = body;
 
     if (!prompt || typeof prompt !== "string") {
       return Response.json({ ok: false, error: "A prompt is required." }, { status: 400 });
     }
 
     const suffix = STYLE_SUFFIX[style] || STYLE_SUFFIX.photoreal;
+
+    // Subject first, then craft, then exclusions. Diffusion models weight the
+    // opening tokens most heavily, so the scene description has to lead.
     const full = `${prompt.trim()}. ${suffix}. ${NEGATIVE}.`;
 
     const result = await generateImage(full, {
       seed: Number.isFinite(seed) ? seed : Math.floor(Math.random() * 1e6),
+      steps,
       imageProvider,
       providerKeys,
-      quality: QUALITY_TIERS.includes(quality) ? quality : "balanced",
     });
 
     return Response.json({ ok: true, ...result });

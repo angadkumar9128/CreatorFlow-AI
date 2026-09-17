@@ -56,7 +56,6 @@ const emptyProviderKeys = {
 const defaultSettings = {
   textProvider: "auto",
   imageProvider: "auto",
-  imageQuality: "balanced",
   soundEnabled: true,
   soundVolume: 0.85,
   musicGenre: "",
@@ -383,7 +382,6 @@ export default function Studio() {
         style: selectedStyle.image,
         seed,
         imageProvider: settings.imageProvider,
-        quality: settings.imageQuality,
         providerKeys,
       }),
     });
@@ -774,17 +772,6 @@ export default function Studio() {
                           {item.label}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <label>
-                    Image quality
-                    <select
-                      value={settings.imageQuality}
-                      onChange={(event) => updateSetting("imageQuality", event.target.value)}
-                    >
-                      <option value="fast">Fast — cheapest, highest daily volume</option>
-                      <option value="balanced">Balanced — sharper, moderate volume</option>
-                      <option value="best">Best — sharpest Cloudflare has, few per day</option>
                     </select>
                   </label>
                   {isReel && (
