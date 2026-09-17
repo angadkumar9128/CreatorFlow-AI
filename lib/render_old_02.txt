@@ -16,7 +16,6 @@
  */
 
 import { buildScore, pickGenre } from "./audio.js";
-import { fixWebmDuration } from "./webm-duration.js";
 
 export const W = 1080;
 export const H = 1920;
@@ -615,45 +614,16 @@ export function drawFrame(ctx, t, state) {
 
 /* ── recording ─────────────────────────────────────────── */
 
-/**
- * Phone encoders choke on 1080x1920 at 9 Mbps. They drop most frames, and some
- * hand back a file with no usable duration at all. Dropping to 720x1280 at
- * 5 Mbps is the difference between a working reel and a 0:00 one. Instagram
- * accepts 720x1280 and re-encodes everything on upload anyway, so the finished
- * post looks the same either way.
- */
-function pickCaptureSize() {
-  if (typeof navigator === "undefined") return { width: W, height: H, scale: 1, bitrate: 9_000_000 };
-
-  const ua = navigator.userAgent || "";
-  const mobile = /iPhone|iPad|iPod|Android/i.test(ua) || navigator.maxTouchPoints > 2;
-  const weak = mobile || (navigator.hardwareConcurrency || 8) <= 4;
-
-  if (!weak) return { width: W, height: H, scale: 1, bitrate: 9_000_000 };
-
-  const scale = 720 / W;
-  return { width: 720, height: 1280, scale, bitrate: 5_000_000 };
-}
-
 function pickMimeType(withAudio) {
-  // MP4 first and hard. Instagram's uploader does not accept WebM, so anything
-  // else is a fallback we hope not to use.
   const candidates = withAudio
     ? [
         "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-        "video/mp4;codecs=avc1,mp4a.40.2",
-        "video/mp4;codecs=h264,aac",
         "video/mp4",
         "video/webm;codecs=vp9,opus",
         "video/webm;codecs=vp8,opus",
         "video/webm",
       ]
-    : [
-        "video/mp4;codecs=avc1.42E01E",
-        "video/mp4",
-        "video/webm;codecs=vp9",
-        "video/webm",
-      ];
+    : ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
 
   for (const type of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type;
@@ -663,31 +633,16 @@ function pickMimeType(withAudio) {
 
 /**
  * Render and record. `state` is the same object drawFrame takes, plus:
- *   state.niche   - drives which musical genre gets picked
- *   state.seed    - makes the whole render reproducible
- *   state.mood    - "energetic" | "balanced" | "calm"
- *   state.audio   - { enabled, genre, volume, intensity }
- *
- * Resolves with { blob, ext, mimeType, hasAudio, music, seed, durationSeconds,
- * width, height, droppedFrames }.
+ *   state.niche      - drives which musical genre gets picked
+ *   state.seed       - makes the whole render reproducible
+ *   state.mood       - "energetic" | "balanced" | "calm"
+ *   state.audio      - { enabled, genre, volume, intensity }
  */
 export async function recordReel(canvas, state, onProgress) {
-  const seed = state.seed || Math.floor(Math.random() * 1e9);
-  state.seed = seed;
-
-  // Instagram rejects anything under 3 seconds outright.
-  if (state.total < 3) {
-    throw new Error(
-      `This reel is only ${state.total.toFixed(1)}s. Instagram needs at least 3 seconds — add a scene or make them longer.`
-    );
-  }
-
-  const capture = pickCaptureSize();
-  canvas.width = capture.width;
-  canvas.height = capture.height;
-
   const ctx = canvas.getContext("2d", { alpha: false });
   const fps = 30;
+  const seed = state.seed || Math.floor(Math.random() * 1e9);
+  state.seed = seed;
 
   const audioOpts = { enabled: true, volume: 0.85, intensity: 1, ...(state.audio || {}) };
 
@@ -698,15 +653,20 @@ export async function recordReel(canvas, state, onProgress) {
   if (audioOpts.enabled && typeof window !== "undefined") {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (AC) {
-      try {
-        audioCtx = new AC();
-        if (audioCtx.state === "suspended") await audioCtx.resume();
-      } catch {
-        audioCtx = null; // silent reel beats a failed render
+      audioCtx = new AC();
+      // A click triggered this render, so resume is allowed.
+      if (audioCtx.state === "suspended") {
+        try {
+          await audioCtx.resume();
+        } catch {
+          /* keep going silently */
+        }
       }
     }
   }
 
+  // The score needs the tempo before the visuals do, because captions and the
+  // pulse are timed to it.
   let bpmForVisuals = state.bpm || 100;
 
   if (audioCtx) {
@@ -734,9 +694,7 @@ export async function recordReel(canvas, state, onProgress) {
   state.fx = buildEffectPlan({
     sceneCount: state.scenes.length,
     seed,
-    mood:
-      state.mood ||
-      (bpmForVisuals > 118 ? "energetic" : bpmForVisuals < 88 ? "calm" : "balanced"),
+    mood: state.mood || (bpmForVisuals > 118 ? "energetic" : bpmForVisuals < 88 ? "calm" : "balanced"),
     bpm: bpmForVisuals,
   });
 
@@ -749,139 +707,54 @@ export async function recordReel(canvas, state, onProgress) {
   try {
     recorder = new MediaRecorder(stream, {
       mimeType: mimeType || undefined,
-      videoBitsPerSecond: capture.bitrate,
+      videoBitsPerSecond: 9_000_000,
       audioBitsPerSecond: 128_000,
     });
-  } catch {
-    // Some phones reject the options object wholesale. Bare constructor works.
-    try {
-      recorder = new MediaRecorder(stream);
-    } catch (err2) {
-      audioCtx?.close?.();
-      throw new Error(`This browser cannot record canvas video: ${err2.message}`);
-    }
+  } catch (err) {
+    audioCtx?.close?.();
+    throw new Error(`This browser cannot record canvas video: ${err.message}`);
   }
 
   return new Promise((resolve, reject) => {
     const chunks = [];
-    let finished = false;
-    let frames = 0;
-    let startedAt = 0;
-
-    const cleanup = () => {
-      document.removeEventListener("visibilitychange", onHide);
-      stream.getTracks().forEach((track) => track.stop());
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.onerror = (e) => {
       audioCtx?.close?.();
+      reject(e.error || new Error("Recording failed"));
     };
 
-    const fail = (message) => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      if (recorder.state !== "inactive") {
-        try {
-          recorder.stop();
-        } catch {
-          /* already stopping */
-        }
-      }
-      reject(new Error(message));
-    };
-
-    /**
-     * Backgrounding the tab pauses requestAnimationFrame. The recorder keeps
-     * running against a frozen canvas, and you end up with a file that is
-     * mostly one still frame. Better to stop and say so.
-     */
-    function onHide() {
-      if (document.hidden && !finished) {
-        fail("Rendering stopped because the app went to the background. Keep this screen open while the reel renders.");
-      }
-    }
-    document.addEventListener("visibilitychange", onHide);
-
-    recorder.ondataavailable = (e) => e.data && e.data.size > 0 && chunks.push(e.data);
-    recorder.onerror = (e) => fail(e.error?.message || "The recorder failed partway through.");
-
-    recorder.onstop = async () => {
-      if (finished) return;
-      finished = true;
-      document.removeEventListener("visibilitychange", onHide);
-
-      const elapsedMs = performance.now() - startedAt;
+    recorder.onstop = () => {
       const type = recorder.mimeType || mimeType || "video/webm";
-
-      stream.getTracks().forEach((track) => track.stop());
+      const ext = type.includes("mp4") ? "mp4" : "webm";
       audioCtx?.close?.();
-
-      let blob = new Blob(chunks, { type });
-
-      if (blob.size === 0) {
-        reject(new Error("The recorder produced an empty file. Try again, or switch browser."));
-        return;
-      }
-
-      // Write a real duration into the WebM header so galleries and Instagram
-      // stop reporting 0:00.
-      blob = await fixWebmDuration(blob, Math.round(elapsedMs));
-
-      const durationSeconds = elapsedMs / 1000;
-      const expectedFrames = Math.round(durationSeconds * fps);
-
       resolve({
-        blob,
-        ext: type.includes("mp4") ? "mp4" : type.includes("matroska") ? "mkv" : "webm",
+        blob: new Blob(chunks, { type }),
+        ext,
         mimeType: type,
         hasAudio: Boolean(dest),
-        music: score
-          ? { genre: score.genre, label: score.genreLabel, bpm: score.bpm }
-          : null,
+        music: score ? { genre: score.genre, label: score.genreLabel, bpm: score.bpm } : null,
         seed,
-        durationSeconds,
-        width: capture.width,
-        height: capture.height,
-        droppedFrames: Math.max(0, expectedFrames - frames),
       });
     };
 
+    // Give the scheduled audio a moment to line up with frame zero.
     const leadIn = audioCtx ? 250 : 0;
 
     setTimeout(() => {
-      if (finished) return;
-
-      try {
-        // A 100ms timeslice keeps chunks small, which matters on phones where a
-        // single large chunk can exhaust memory mid-render.
-        recorder.start(100);
-      } catch (err) {
-        fail(`Could not start recording: ${err.message}`);
-        return;
-      }
-
-      startedAt = performance.now();
+      const start = performance.now();
+      recorder.start(200);
 
       function tick() {
-        if (finished) return;
-
-        const t = (performance.now() - startedAt) / 1000;
-
-        // Everything is authored in 1080x1920 space; this scales it down to
-        // whatever the encoder can actually keep up with.
-        ctx.setTransform(capture.scale, 0, 0, capture.scale, 0, 0);
+        const t = (performance.now() - start) / 1000;
 
         if (t >= state.total) {
           drawFrame(ctx, state.total - 0.001, state);
-          frames++;
           onProgress?.(1);
-          // Let the encoder flush the tail before closing the file.
-          setTimeout(() => {
-            if (recorder.state !== "inactive") recorder.stop();
-          }, 400);
+          setTimeout(() => recorder.state !== "inactive" && recorder.stop(), 300);
           return;
         }
 
         drawFrame(ctx, t, state);
-        frames++;
         onProgress?.(t / state.total);
         requestAnimationFrame(tick);
       }

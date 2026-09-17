@@ -5,9 +5,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NICHES } from "@/lib/prompt";
 import { W, H, THEMES, loadImage, timeline, drawFrame, recordReel } from "@/lib/render";
-import { GENRES } from "@/lib/audio";
-import { saveFile, instagramCheck, isIOS, isMobile } from "@/lib/download";
-import { toInstagramMp4, looksInstagramReady } from "@/lib/remux";
 
 const IMAGE_W = 1080;
 const IMAGE_H = 1350;
@@ -20,16 +17,16 @@ const TYPES = [
 ];
 const LANGUAGES = ["English", "Hindi", "Hinglish"];
 const CREATOR_STYLES = [
-  { id: "viral", label: "Viral", tone: "punchy", image: "vibrant", theme: "bold", mood: "energetic" },
-  { id: "educational", label: "Educational", tone: "authority", image: "editorial", theme: "cool", mood: "balanced" },
-  { id: "funny", label: "Funny", tone: "funny", image: "illustrated", theme: "bold", mood: "energetic" },
-  { id: "premium", label: "Premium", tone: "authority", image: "editorial", theme: "warm", mood: "calm" },
-  { id: "cinematic", label: "Cinematic", tone: "calm", image: "cinematic", theme: "warm", mood: "calm" },
-  { id: "fast", label: "Fast", tone: "punchy", image: "vibrant", theme: "bold", mood: "energetic" },
-  { id: "creative", label: "Creative", tone: "punchy", image: "illustrated", theme: "cool", mood: "balanced" },
-  { id: "emotional", label: "Emotional", tone: "calm", image: "photoreal", theme: "warm", mood: "calm" },
-  { id: "news", label: "News", tone: "authority", image: "editorial", theme: "mono", mood: "balanced" },
-  { id: "auto", label: "Auto", tone: "punchy", image: "photoreal", theme: "bold", mood: null },
+  { id: "viral", label: "Viral", tone: "punchy", image: "vibrant", theme: "bold" },
+  { id: "educational", label: "Educational", tone: "authority", image: "editorial", theme: "cool" },
+  { id: "funny", label: "Funny", tone: "funny", image: "illustrated", theme: "bold" },
+  { id: "premium", label: "Premium", tone: "authority", image: "editorial", theme: "warm" },
+  { id: "cinematic", label: "Cinematic", tone: "calm", image: "moody", theme: "warm" },
+  { id: "fast", label: "Fast", tone: "punchy", image: "vibrant", theme: "bold" },
+  { id: "creative", label: "Creative", tone: "punchy", image: "illustrated", theme: "cool" },
+  { id: "emotional", label: "Emotional", tone: "calm", image: "photoreal", theme: "warm" },
+  { id: "news", label: "News", tone: "authority", image: "editorial", theme: "mono" },
+  { id: "auto", label: "Auto", tone: "punchy", image: "photoreal", theme: "bold" },
 ];
 
 const STORAGE_KEY = "creatorflow-history-v1";
@@ -39,8 +36,6 @@ const SCHEDULE_KEY = "creatorflow-schedule-v1";
 
 const todayLabel = () =>
   new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
-
-const newSeed = () => Math.floor(Math.random() * 1_000_000_000);
 
 const emptyMeme = { top: "", bottom: "" };
 const emptyProviderKeys = {
@@ -57,8 +52,7 @@ const defaultSettings = {
   textProvider: "auto",
   imageProvider: "auto",
   soundEnabled: true,
-  soundVolume: 0.85,
-  musicGenre: "",
+  soundVolume: 0.22,
   appTheme: "dark",
 };
 
@@ -203,18 +197,8 @@ export default function Studio() {
     category: "motivation",
   });
 
-  // Holds the look and the score together, so a re-render after a caption edit
-  // produces the identical reel instead of a brand new one.
-  const [renderSeed, setRenderSeed] = useState(newSeed);
-  // isMobile/isIOS read navigator, which does not exist during server render.
-  // Gating on mount keeps the first client paint identical to the server's.
-  const [mounted, setMounted] = useState(false);
-  const [saveState, setSaveState] = useState(null);
-  const [converting, setConverting] = useState(null);
-
   const canvasRef = useRef(null);
   const outputRef = useRef(null);
-  const blobRef = useRef(null);
 
   const selectedStyle = useMemo(
     () => CREATOR_STYLES.find((item) => item.id === style) || CREATOR_STYLES.at(-1),
@@ -222,7 +206,6 @@ export default function Studio() {
   );
   const selectedCategory = NICHES.find((item) => item.id === category);
   const categoryLabel = category === "custom" ? customCategory || "Custom" : selectedCategory?.label || "Motivation";
-  const nicheId = category === "custom" ? customCategory.trim().toLowerCase() : category;
   const isReel = type === "video";
   const isMeme = type === "meme";
   const fullCaption = plan ? `${plan.caption}\n\n${plan.hashtags.join(" ")}` : "";
@@ -230,19 +213,7 @@ export default function Studio() {
   const canGenerate = category !== "custom" || customCategory.trim().length > 1;
   const studioClass = `studio-shell theme-${settings.appTheme}`;
 
-  const igCheck = useMemo(() => {
-    if (!output || output.kind !== "video") return null;
-    return instagramCheck({
-      mimeType: output.mimeType,
-      durationSeconds: output.durationSeconds,
-      hasAudio: output.hasAudio,
-      sizeBytes: output.size,
-    });
-  }, [output]);
-
   useEffect(() => {
-    setMounted(true);
-
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
@@ -345,11 +316,8 @@ export default function Studio() {
   function clearOutput() {
     if (outputRef.current) URL.revokeObjectURL(outputRef.current);
     outputRef.current = null;
-    blobRef.current = null;
     setOutput(null);
     setRenderPct(0);
-    setSaveState(null);
-    setConverting(null);
   }
 
   async function fetchPlan() {
@@ -414,7 +382,7 @@ export default function Studio() {
     return out;
   }
 
-  async function composeOutput(workingPlan, images, seedOverride) {
+  async function composeOutput(workingPlan, images) {
     push("render", isReel ? "Rendering reel in this browser" : "Composing 1080x1350 creative");
     await document.fonts.ready;
 
@@ -422,6 +390,8 @@ export default function Studio() {
     const loaded = await Promise.all(images.map(loadImage));
 
     if (isReel) {
+      canvas.width = W;
+      canvas.height = H;
       const { marks, total } = timeline(workingPlan.scenes);
       const state = {
         scenes: workingPlan.scenes,
@@ -431,61 +401,33 @@ export default function Studio() {
         hook: workingPlan.hook,
         handle,
         theme: THEMES[selectedStyle.theme],
-
-        // Everything below drives the new motion and score engines.
-        niche: nicheId,
-        seed: seedOverride ?? renderSeed,
-        mood: selectedStyle.mood || undefined,
-        audio: {
-          enabled: settings.soundEnabled,
-          volume: Math.min(1, Math.max(0.15, Number(settings.soundVolume) || 0.85)),
-          genre: settings.musicGenre || undefined,
-        },
+        soundEnabled: settings.soundEnabled,
+        soundVolume: Number(settings.soundVolume) || 0.22,
+        soundProfile: style === "auto" ? selectedStyle.tone : style,
       };
-
-      // recordReel sizes the canvas itself, because phones need 720x1280.
-      const result = await recordReel(canvas, state, setRenderPct);
-      const url = URL.createObjectURL(result.blob);
+      const { blob, ext } = await recordReel(canvas, state, setRenderPct);
+      const url = URL.createObjectURL(blob);
       outputRef.current = url;
-      blobRef.current = result.blob;
-
-      setOutput({
-        url,
-        kind: "video",
-        ext: result.ext,
-        mimeType: result.mimeType,
-        durationSeconds: result.durationSeconds,
-        hasAudio: result.hasAudio,
-        music: result.music,
-        width: result.width,
-        height: result.height,
-        size: result.blob.size,
-        droppedFrames: result.droppedFrames,
-      });
+      setOutput({ url, kind: "video", ext });
     } else {
       canvas.width = IMAGE_W;
       canvas.height = IMAGE_H;
       const ctx = canvas.getContext("2d", { alpha: false });
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
       drawStaticPost(ctx, loaded[0], { plan: workingPlan, type, handle, meme });
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.94));
       const url = URL.createObjectURL(blob);
       outputRef.current = url;
-      blobRef.current = blob;
-      setOutput({ url, kind: "image", ext: "jpg", mimeType: "image/jpeg", size: blob.size });
+      setOutput({ url, kind: "image", ext: "jpg" });
     }
 
     settle("render", "done");
   }
 
-  async function produce({ reusePlan = null, reuseShots = null, freshLook = false } = {}) {
+  async function produce({ reusePlan = null, reuseShots = null } = {}) {
     if (!canGenerate) {
       setError("Add a custom category before generating.");
       return;
     }
-
-    const seedForRun = freshLook || !reusePlan ? newSeed() : renderSeed;
-    if (seedForRun !== renderSeed) setRenderSeed(seedForRun);
 
     setBusy(true);
     setError(null);
@@ -511,7 +453,7 @@ export default function Studio() {
         setShots(images);
       }
 
-      await composeOutput(workingPlan, images, seedForRun);
+      await composeOutput(workingPlan, images);
       remember({
         id: crypto.randomUUID(),
         title: workingPlan.title || workingPlan.hook || "Untitled creative",
@@ -540,7 +482,7 @@ export default function Studio() {
       nextShots[index] = await fetchShot(plan.scenes[index].imagePrompt, Date.now() % 1_000_000);
       setShots(nextShots);
       settle(`img-${index}`, "done");
-      await composeOutput(plan, nextShots, renderSeed);
+      await composeOutput(plan, nextShots);
     } catch (err) {
       settle(`img-${index}`, "fail");
       setError(err.message);
@@ -555,7 +497,7 @@ export default function Studio() {
     setError(null);
     clearOutput();
     try {
-      await composeOutput(plan, shots, renderSeed);
+      await composeOutput(plan, shots);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -589,63 +531,12 @@ export default function Studio() {
     }
   }
 
-  /**
-   * On iOS an anchor with `download` does nothing useful, so this routes
-   * through the OS share sheet where "Save Video" writes to Photos.
-   */
-  async function download() {
-    if (!blobRef.current) return;
-    setSaveState({ state: "working", message: "Preparing the file" });
-    try {
-      const result = await saveFile(blobRef.current, `creatorflow-${type}-${Date.now()}`);
-      if (result.method === "cancelled") {
-        setSaveState(null);
-        return;
-      }
-      setSaveState({
-        state: "done",
-        message:
-          result.note ||
-          (result.method === "download" ? `Saved as ${result.filename}` : `Opened ${result.filename}`),
-      });
-    } catch (err) {
-      setSaveState({ state: "fail", message: err.message });
-    }
-  }
-
-  /** Re-containers the recording as a normal MP4 Instagram will accept. */
-  async function convertForInstagram() {
-    if (!blobRef.current || !output) return;
-    setConverting({ stage: "loading", ratio: 0, message: "Loading the converter" });
-    try {
-      const mp4 = await toInstagramMp4(blobRef.current, {
-        durationSeconds: output.durationSeconds,
-        onProgress: (info) =>
-          setConverting({
-            stage: info.stage,
-            ratio: info.ratio ?? 0,
-            message: info.detail || (info.stage === "converting" ? "Converting" : "Working"),
-          }),
-      });
-
-      if (outputRef.current) URL.revokeObjectURL(outputRef.current);
-      const url = URL.createObjectURL(mp4);
-      outputRef.current = url;
-      blobRef.current = mp4;
-
-      setOutput((prev) => ({
-        ...prev,
-        url,
-        ext: "mp4",
-        mimeType: "video/mp4",
-        size: mp4.size,
-      }));
-      setConverting(null);
-      setSaveState({ state: "done", message: "Converted to MP4. Download it now." });
-    } catch (err) {
-      setConverting(null);
-      setSaveState({ state: "fail", message: `Conversion failed: ${err.message}` });
-    }
+  function download() {
+    if (!output) return;
+    const a = document.createElement("a");
+    a.href = output.url;
+    a.download = `creatorflow-${type}-${Date.now()}.${output.ext}`;
+    a.click();
   }
 
   function updatePlanField(field, value) {
@@ -786,52 +677,11 @@ export default function Studio() {
                       </select>
                     </label>
                   )}
-                  {isReel && (
-                    <label>
-                      Music
-                      <select
-                        value={settings.musicGenre}
-                        onChange={(event) => updateSetting("musicGenre", event.target.value)}
-                      >
-                        <option value="">Match my category</option>
-                        {Object.entries(GENRES).map(([id, genre]) => (
-                          <option key={id} value={id}>
-                            {genre.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
                   <label>
                     Creator handle
                     <input value={handle} placeholder="@yourhandle" onChange={(event) => setHandle(event.target.value)} />
                   </label>
                 </div>
-
-                {isReel && (
-                  <div className="form-grid">
-                    <label>
-                      Music volume {Math.round((Number(settings.soundVolume) || 0.85) * 100)}%
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={settings.soundVolume}
-                        onChange={(event) => updateSetting("soundVolume", Number(event.target.value))}
-                      />
-                    </label>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={settings.soundEnabled}
-                        onChange={(event) => updateSetting("soundEnabled", event.target.checked)}
-                      />
-                      Include a generated soundtrack
-                    </label>
-                  </div>
-                )}
-
                 <label className="wide-label">
                   Angle or topic
                   <textarea
@@ -856,13 +706,6 @@ export default function Studio() {
                   <button className="secondary-button" disabled={busy || !plan} onClick={() => produce()}>
                     Regenerate All
                   </button>
-                  <button
-                    className="secondary-button"
-                    disabled={busy || !plan || shots.length === 0}
-                    onClick={() => produce({ reusePlan: plan, reuseShots: shots, freshLook: true })}
-                  >
-                    New Look and Sound
-                  </button>
                   <button className="secondary-button" disabled={busy || !plan} onClick={saveCurrent}>
                     {copied === "saved" ? "Saved" : "Save"}
                   </button>
@@ -877,11 +720,6 @@ export default function Studio() {
                       </li>
                     ))}
                   </ul>
-                )}
-                {busy && isReel && (
-                  <p className="muted">
-                    Keep this screen open. Rendering runs in real time and pauses if the app goes to the background.
-                  </p>
                 )}
                 {error && (
                   <div className="alert" role="alert">
@@ -914,16 +752,7 @@ export default function Studio() {
             <aside className="preview-rail">
               <div className={isReel ? "phone-preview" : "post-preview"}>
                 <canvas ref={canvasRef} style={{ display: busy && !output ? "block" : "none" }} />
-                {output?.kind === "video" && (
-                  <video
-                    key={output.url}
-                    src={output.url}
-                    controls
-                    loop
-                    playsInline
-                    preload="metadata"
-                  />
-                )}
+                {output?.kind === "video" && <video src={output.url} controls loop playsInline />}
                 {output?.kind === "image" && <img src={output.url} alt="Generated creative" />}
                 {!output && !busy && (
                   <div className="empty-preview">
@@ -939,8 +768,8 @@ export default function Studio() {
               </div>
 
               <div className="preview-actions">
-                <button className="primary-button" disabled={!output || saveState?.state === "working"} onClick={download}>
-                  {saveState?.state === "working" ? "Preparing" : mounted && isMobile() ? "Save to device" : "Download"}
+                <button className="primary-button" disabled={!output} onClick={download}>
+                  Download
                 </button>
                 <button className="secondary-button" disabled={!plan} onClick={() => copy("caption", fullCaption)}>
                   {copied === "caption" ? "Copied" : "Copy"}
@@ -949,24 +778,8 @@ export default function Studio() {
                   {copied === "saved" ? "Saved" : "Save"}
                 </button>
               </div>
-
-              {output?.kind === "video" && (
-                <OutputFacts
-                  output={output}
-                  check={igCheck}
-                  converting={converting}
-                  onConvert={convertForInstagram}
-                />
-              )}
-
-              {saveState && (
-                <p className={saveState.state === "fail" ? "alert" : "preview-note"}>{saveState.message}</p>
-              )}
-
               <p className="preview-note">
-                {mounted && isIOS()
-                  ? "Saving opens the iOS share sheet. Choose Save Video so it lands in Photos, then post from Instagram."
-                  : "Reel export stays browser-side. Saved items are kept in this browser for the local studio dashboard."}
+                Reel export stays browser-side. Saved items are kept in this browser for the local studio dashboard.
               </p>
             </aside>
           </div>
@@ -979,56 +792,6 @@ export default function Studio() {
           <Placeholder title="Settings" body="Handle, language and generation preferences are edited directly in the Generate view." />
         )}
       </main>
-    </div>
-  );
-}
-
-function OutputFacts({ output, check, converting, onConvert }) {
-  const seconds = output.durationSeconds ? `${output.durationSeconds.toFixed(1)}s` : "unknown";
-  const megabytes = output.size ? `${(output.size / 1024 / 1024).toFixed(1)} MB` : "";
-
-  return (
-    <div className="panel output-facts">
-      <div className="fact-row">
-        <span>Length</span>
-        <strong>{seconds}</strong>
-      </div>
-      <div className="fact-row">
-        <span>Format</span>
-        <strong>
-          {output.ext.toUpperCase()} {output.width}x{output.height} {megabytes}
-        </strong>
-      </div>
-      {output.music && (
-        <div className="fact-row">
-          <span>Soundtrack</span>
-          <strong>
-            {output.music.label}, {output.music.bpm} bpm
-          </strong>
-        </div>
-      )}
-      {output.droppedFrames > 30 && (
-        <p className="muted">
-          {output.droppedFrames} frames were dropped while encoding. The reel still plays, but closing other
-          apps or tabs before rendering will make it smoother.
-        </p>
-      )}
-
-      {check && !check.ok && (
-        <div className="alert">
-          <strong>Instagram will reject this as it is.</strong>
-          {check.problems.join(" ")}
-        </div>
-      )}
-      {check?.warnings?.length > 0 && <p className="muted">{check.warnings.join(" ")}</p>}
-
-      {!looksInstagramReady(output.mimeType) && (
-        <button className="secondary-button" disabled={!!converting} onClick={onConvert}>
-          {converting
-            ? `${converting.message}${converting.ratio ? ` ${Math.round(converting.ratio * 100)}%` : ""}`
-            : "Convert to MP4 for Instagram"}
-        </button>
-      )}
     </div>
   );
 }

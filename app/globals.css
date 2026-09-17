@@ -713,3 +713,85 @@ textarea[readonly] {
     flex-direction: column;
   }
 }
+
+/* ─────────────────────────────────────────────────────────
+   Append to app/globals.css.
+   Styles for the output facts panel, the music controls and
+   the save status line added in this update.
+   ───────────────────────────────────────────────────────── */
+
+.output-facts {
+  margin-top: 14px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.fact-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fact-row:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.fact-row span {
+  opacity: 0.62;
+}
+
+.fact-row strong {
+  text-align: right;
+  font-weight: 600;
+}
+
+.checkbox-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: #f5b13c;
+  margin: 0;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #f5b13c;
+  margin-top: 6px;
+}
+
+.output-facts .secondary-button {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.output-facts .alert {
+  margin: 4px 0 0;
+}
+
+.preview-note+.preview-note {
+  margin-top: 6px;
+}
+
+/* The preview video must never overflow its frame on a phone. */
+.phone-preview video,
+.phone-preview canvas,
+.post-preview canvas,
+.post-preview img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
