@@ -7,7 +7,7 @@ import { NICHES } from "@/lib/prompt";
 import { W, H, THEMES, loadImage, timeline, drawFrame, recordReel } from "@/lib/render";
 import { GENRES } from "@/lib/audio";
 import { saveFile, instagramCheck, isIOS, isMobile } from "@/lib/download";
-import { toInstagramMp4 } from "@/lib/remux";
+import { toInstagramMp4, looksInstagramReady, preloadFFmpeg } from "@/lib/remux";
 
 const IMAGE_W = 1080;
 const IMAGE_H = 1350;
@@ -238,12 +238,12 @@ export default function Studio() {
       durationSeconds: output.durationSeconds,
       hasAudio: output.hasAudio,
       sizeBytes: output.size,
-      verified: output.instagramReady === true,
     });
   }, [output]);
 
   useEffect(() => {
     setMounted(true);
+    preloadFFmpeg(); // idle-load the ~32MB converter now, not on click
 
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -464,7 +464,6 @@ export default function Studio() {
         height: result.height,
         size: result.blob.size,
         droppedFrames: result.droppedFrames,
-        instagramReady: /mp4/i.test(result.mimeType || ""),
       });
     } else {
       canvas.width = IMAGE_W;
@@ -601,17 +600,7 @@ export default function Studio() {
     if (!blobRef.current) return;
     setSaveState({ state: "working", message: "Preparing the file" });
     try {
-      const result = await saveFile(blobRef.current, `creatorflow-${type}-${Date.now()}`, {
-        durationSeconds: output?.kind === "video" ? output.durationSeconds : undefined,
-        onProgress: (info) => {
-          if (info?.stage === "loading") {
-            setSaveState({ state: "working", message: info.detail || "Loading the converter" });
-          } else if (info?.stage === "converting") {
-            const pct = Number.isFinite(info.ratio) ? ` (${Math.round(info.ratio * 100)}%)` : "";
-            setSaveState({ state: "working", message: `Preparing the MP4${pct}` });
-          }
-        },
-      });
+      const result = await saveFile(blobRef.current, `creatorflow-${type}-${Date.now()}`);
       if (result.method === "cancelled") {
         setSaveState(null);
         return;
@@ -630,9 +619,9 @@ export default function Studio() {
   /** Re-containers the recording as a normal MP4 Instagram will accept. */
   async function convertForInstagram() {
     if (!blobRef.current || !output) return;
-    setConverting({ stage: "loading", ratio: 0, message: "Loading the converter" });
+    setConverting({ stage: "loading", ratio: 0, message: "Checking the file" });
     try {
-      const mp4 = await toInstagramMp4(blobRef.current, {
+      const { blob: mp4, usedFfmpeg } = await toInstagramMp4(blobRef.current, {
         durationSeconds: output.durationSeconds,
         onProgress: (info) =>
           setConverting({
@@ -653,10 +642,14 @@ export default function Studio() {
         ext: "mp4",
         mimeType: "video/mp4",
         size: mp4.size,
-        instagramReady: true,
       }));
       setConverting(null);
-      setSaveState({ state: "done", message: "Converted to MP4. Download it now." });
+      setSaveState({
+        state: "done",
+        message: usedFfmpeg
+          ? "Converted to MP4. Download it now."
+          : "This was already a valid MP4 — just fixed the header. Download it now.",
+      });
     } catch (err) {
       setConverting(null);
       setSaveState({ state: "fail", message: `Conversion failed: ${err.message}` });
@@ -1048,7 +1041,7 @@ function OutputFacts({ output, check, converting, onConvert }) {
       )}
       {check?.warnings?.length > 0 && <p className="muted">{check.warnings.join(" ")}</p>}
 
-      {!output.instagramReady && (
+      {!looksInstagramReady(output.mimeType) && (
         <button className="secondary-button" disabled={!!converting} onClick={onConvert}>
           {converting
             ? `${converting.message}${converting.ratio ? ` ${Math.round(converting.ratio * 100)}%` : ""}`
