@@ -464,7 +464,7 @@ export default function Studio() {
         height: result.height,
         size: result.blob.size,
         droppedFrames: result.droppedFrames,
-        instagramReady: false,
+        instagramReady: /mp4/i.test(result.mimeType || ""),
       });
     } else {
       canvas.width = IMAGE_W;
