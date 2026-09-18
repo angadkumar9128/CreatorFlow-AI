@@ -599,7 +599,17 @@ export default function Studio() {
     if (!blobRef.current) return;
     setSaveState({ state: "working", message: "Preparing the file" });
     try {
-      const result = await saveFile(blobRef.current, `creatorflow-${type}-${Date.now()}`);
+      const result = await saveFile(blobRef.current, `creatorflow-${type}-${Date.now()}`, {
+        durationSeconds: output?.kind === "video" ? output.durationSeconds : undefined,
+        onProgress: (info) => {
+          if (info?.stage === "loading") {
+            setSaveState({ state: "working", message: info.detail || "Loading the converter" });
+          } else if (info?.stage === "converting") {
+            const pct = Number.isFinite(info.ratio) ? ` (${Math.round(info.ratio * 100)}%)` : "";
+            setSaveState({ state: "working", message: `Preparing the MP4${pct}` });
+          }
+        },
+      });
       if (result.method === "cancelled") {
         setSaveState(null);
         return;
