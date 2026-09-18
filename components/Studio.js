@@ -7,7 +7,7 @@ import { NICHES } from "@/lib/prompt";
 import { W, H, THEMES, loadImage, timeline, drawFrame, recordReel } from "@/lib/render";
 import { GENRES } from "@/lib/audio";
 import { saveFile, instagramCheck, isIOS, isMobile } from "@/lib/download";
-import { toInstagramMp4, looksInstagramReady } from "@/lib/remux";
+import { toInstagramMp4 } from "@/lib/remux";
 
 const IMAGE_W = 1080;
 const IMAGE_H = 1350;
@@ -238,6 +238,7 @@ export default function Studio() {
       durationSeconds: output.durationSeconds,
       hasAudio: output.hasAudio,
       sizeBytes: output.size,
+      verified: output.instagramReady === true,
     });
   }, [output]);
 
@@ -463,6 +464,7 @@ export default function Studio() {
         height: result.height,
         size: result.blob.size,
         droppedFrames: result.droppedFrames,
+        instagramReady: false,
       });
     } else {
       canvas.width = IMAGE_W;
@@ -651,6 +653,7 @@ export default function Studio() {
         ext: "mp4",
         mimeType: "video/mp4",
         size: mp4.size,
+        instagramReady: true,
       }));
       setConverting(null);
       setSaveState({ state: "done", message: "Converted to MP4. Download it now." });
@@ -1045,7 +1048,7 @@ function OutputFacts({ output, check, converting, onConvert }) {
       )}
       {check?.warnings?.length > 0 && <p className="muted">{check.warnings.join(" ")}</p>}
 
-      {!looksInstagramReady(output.mimeType) && (
+      {!output.instagramReady && (
         <button className="secondary-button" disabled={!!converting} onClick={onConvert}>
           {converting
             ? `${converting.message}${converting.ratio ? ` ${Math.round(converting.ratio * 100)}%` : ""}`
