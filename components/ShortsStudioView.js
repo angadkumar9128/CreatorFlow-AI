@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createRandomShorts, createRegularShorts, DEFAULT_SHORT_SECONDS, formatTime, MAX_EDIT_SECONDS, MIN_EDIT_SECONDS, validateSourceDuration } from "@/lib/shorts-studio";
+import { createRandomShorts, createRegularShorts, createAIShorts, DEFAULT_SHORT_SECONDS, formatTime, MAX_EDIT_SECONDS, MIN_EDIT_SECONDS, validateSourceDuration } from "@/lib/shorts-studio";
 import { exportShort } from "@/lib/shorts-export";
 import { saveFile } from "@/lib/download";
+import { analyzeVideoForCreator } from "@/lib/ai-shorts";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
@@ -22,6 +23,9 @@ export default function ShortsStudioView() {
   const [creatorHandle, setCreatorHandle] = useState("");
   const [handlePosition, setHandlePosition] = useState("bottom-right");
   const [handleOpacity, setHandleOpacity] = useState(0.9);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiProgress, setAiProgress] = useState(0);
+  const [aiResult, setAiResult] = useState(null);
 
   const revokeSource = useCallback(() => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
@@ -50,6 +54,40 @@ export default function ShortsStudioView() {
       setMeta({ name: file.name, size: file.size, duration: video.duration, width: video.videoWidth, height: video.videoHeight });
     };
     video.onerror = () => { sourceRef.current = null; revokeSource(); setSourceUrl(""); setError("The browser could not read this video."); };
+  }
+
+  async function runAIStudio() {
+    if (!sourceRef.current || !meta) return setError("Upload a valid source video first.");
+    let providerKeys = {};
+    try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
+    const geminiKey = String(providerKeys.geminiApiKey || "").trim();
+    if (!geminiKey) return setError("Add your Gemini API key in AI Providers first. The AI Shorts features use your existing free Gemini key.");
+    setAiLoading(true); setAiProgress(0); setError(""); setNotice("");
+    try {
+      const result = await analyzeVideoForCreator(sourceRef.current, geminiKey, meta.duration, {
+        maxClips: 8,
+        targetLength: Math.min(60, Math.max(20, Number(shortLength) || 45)),
+        onProgress: ({ ratio = 0, stage }) => {
+          setAiProgress(ratio);
+          setNotice(stage === "uploading" ? "Uploading video to Gemini…" : stage === "processing" ? "Gemini is processing the video…" : stage === "analyzing" ? "AI is finding the strongest moments, captions and hooks…" : "Finishing AI analysis…");
+        },
+      });
+      const generated = createAIShorts(meta.duration, result.clips);
+      const withAI = generated.map((item) => ({
+        ...item,
+        captions: result.captions.filter((caption) => caption.end > item.videoStart && caption.start < item.videoEnd),
+        hooks: result.hooks || [],
+      }));
+      if (!withAI.length) throw new Error("Gemini could not find usable Shorts in this video. Try a video with clear speech or a stronger story.");
+      setShorts(withAI);
+      setAiResult(result);
+      setMode("ai");
+      setNotice(`AI created ${withAI.length} Shorts with captions and hook ideas. You can edit every Short normally.`);
+    } catch (e) {
+      setError(e?.message || "AI analysis failed.");
+    } finally {
+      setAiLoading(false); setAiProgress(1);
+    }
   }
 
   function generate(nextMode = mode) {
@@ -134,6 +172,7 @@ export default function ShortsStudioView() {
         creatorHandle: creatorHandle.trim(),
         handlePosition,
         handleOpacity,
+        captions: item.captions || [],
         onProgress: (p) => setShorts((prev) => prev.map((x) => x.id === item.id ? { ...x, renderProgress: p.ratio || 0, renderStatus: p.stage === "converting" ? "converting" : "rendering" } : x)),
       });
       const url = URL.createObjectURL(blob);
@@ -154,7 +193,7 @@ export default function ShortsStudioView() {
   }
 
   function reset(item) {
-    patch(item.id, { videoStart: item.sourceStart, videoEnd: item.sourceEnd, music: null, originalVolume: 1 });
+    patch(item.id, { videoStart: item.sourceStart, videoEnd: item.sourceEnd, music: null, originalVolume: 1, captions: [], hooks: [] });
   }
 
   return (
@@ -210,6 +249,9 @@ export default function ShortsStudioView() {
           </div>
           <div className="short-handle-note">Burned into the downloaded Short.</div>
           <div className="shorts-actions shorts-generate-actions">
+            <button className="secondary-button ai-action-button" disabled={!meta || batch || aiLoading} onClick={runAIStudio}>
+              {aiLoading ? `AI Analyzing ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
+            </button>
             <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
             <button className="secondary-button" disabled={!meta || batch} onClick={() => generate("random")}>Regenerate Random</button>
           </div>
@@ -218,6 +260,13 @@ export default function ShortsStudioView() {
       </div>
 
       {notice && <p className="preview-note">{notice}</p>}
+      {aiResult && <section className="short-ai-results">
+        <div className="short-ai-results-head"><div><strong>AI Creator Assistant</strong><span>Gemini analysis · clips + captions + hooks</span></div><button className="text-button" onClick={() => setAiResult(null)}>Hide</button></div>
+        {aiResult.summary && <p className="muted">{aiResult.summary}</p>}
+        <div className="short-hook-list">
+          {(aiResult.hooks || []).map((hook, i) => <button key={i} className="short-hook-chip" onClick={() => navigator.clipboard?.writeText(hook.text)} title="Tap to copy">{hook.text}<small>{hook.style}</small></button>)}
+        </div>
+      </section>}
       {shorts.length > 0 && <div className="shorts-summary">
         <strong>{shorts.length} Shorts</strong>
         <div className="shorts-actions">
@@ -242,6 +291,7 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
   const videoRef = useRef(null);
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
+  const [activeCaption, setActiveCaption] = useState("");
   const activeHandleRef = useRef(null);
   const [startDraft, setStartDraft] = useState(item.videoStart.toFixed(1));
   const [endDraft, setEndDraft] = useState(item.videoEnd.toFixed(1));
@@ -283,6 +333,8 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
   function timeUpdate() {
     const video = videoRef.current;
     if (!video || !playing) return;
+    const caption = (item.captions || []).find((entry) => video.currentTime >= entry.start && video.currentTime < entry.end);
+    setActiveCaption(caption?.text || "");
     if (video.currentTime >= item.videoEnd - .04) {
       video.pause(); musicRef.current?.pause(); video.currentTime = item.videoStart; setPlaying(false);
     }
@@ -351,6 +403,7 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
         <div className="short-card-preview">
           <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
           {item.music && <audio ref={musicRef} src={item.music.url} preload="metadata" />}
+          {activeCaption && <div className="short-preview-caption">{activeCaption}</div>}
           {creatorHandle.trim() && <div className={`short-creator-handle ${handlePosition}`} style={{ opacity: handleOpacity }}>{creatorHandle.trim()}</div>}
           <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>
         </div>
@@ -409,6 +462,8 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
             </>}
           </section>
 
+          {item.hooks?.length > 0 && <section className="short-ai-hook-section"><strong>AI Hook ideas</strong><div className="short-hook-list">{item.hooks.slice(0, 3).map((hook, i) => <button key={i} className="short-hook-chip" onClick={() => navigator.clipboard?.writeText(hook.text)}>{hook.text}</button>)}</div></section>}
+          {item.captions?.length > 0 && <div className="short-handle-note">AI captions are previewed now and burned into the downloaded Short.</div>}
           {item.error && <div className="alert short-error">{item.error}</div>}
           <div className="short-status"><span className="short-status-text">{item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
