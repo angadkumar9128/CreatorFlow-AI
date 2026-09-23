@@ -205,6 +205,7 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
   const videoRef = useRef(null);
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
+  const activeHandleRef = useRef(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -249,6 +250,41 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
   const setStart = (v) => patch(item.id, { videoStart: Math.max(item.sourceStart, Math.min(Number(v), item.videoEnd - MIN_EDIT_SECONDS)) });
   const setEnd = (v) => patch(item.id, { videoEnd: Math.min(item.sourceEnd, Math.max(Number(v), item.videoStart + MIN_EDIT_SECONDS)) });
 
+  function setTimelineFromPointer(clientX, handle) {
+    const target = document.getElementById(`short-timeline-${item.id}`);
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const value = item.sourceStart + ratio * (item.sourceEnd - item.sourceStart);
+    if (handle === "start") setStart(value);
+    else setEnd(value);
+  }
+
+  function timelinePointerDown(event) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    const value = item.sourceStart + ratio * (item.sourceEnd - item.sourceStart);
+    const startDistance = Math.abs(value - item.videoStart);
+    const endDistance = Math.abs(value - item.videoEnd);
+    const handle = startDistance <= endDistance ? "start" : "end";
+    activeHandleRef.current = handle;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setTimelineFromPointer(event.clientX, handle);
+  }
+
+  function timelinePointerMove(event) {
+    if (!activeHandleRef.current) return;
+    event.preventDefault();
+    setTimelineFromPointer(event.clientX, activeHandleRef.current);
+  }
+
+  function timelinePointerUp(event) {
+    activeHandleRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   return (
     <article className="short-card">
       <div className="short-card-top">
@@ -266,11 +302,20 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
         <div className="short-editor">
           <section className="short-section">
             <div className="short-section-head"><strong>Video timeline</strong><span>{formatTime(item.videoStart)} – {formatTime(item.videoEnd)}</span></div>
-            <div className="short-timeline">
+            <div
+              id={`short-timeline-${item.id}`}
+              className="short-timeline"
+              onPointerDown={timelinePointerDown}
+              onPointerMove={timelinePointerMove}
+              onPointerUp={timelinePointerUp}
+              onPointerCancel={timelinePointerUp}
+            >
               <div className="short-timeline-track" />
               <div className="short-timeline-selected" style={{ left: `${left}%`, width: `${width}%` }} />
-              <input type="range" min={item.sourceStart} max={item.videoEnd - MIN_EDIT_SECONDS} step=".1" value={item.videoStart} onChange={(e) => setStart(e.target.value)} />
-              <input type="range" min={item.videoStart + MIN_EDIT_SECONDS} max={item.sourceEnd} step=".1" value={item.videoEnd} onChange={(e) => setEnd(e.target.value)} />
+              <div className="short-timeline-handle start" style={{ left: `${left}%` }} aria-hidden="true" />
+              <div className="short-timeline-handle end" style={{ left: `${left + width}%` }} aria-hidden="true" />
+              <input aria-label={`Short ${item.index} start time`} type="range" min={item.sourceStart} max={item.videoEnd - MIN_EDIT_SECONDS} step=".1" value={item.videoStart} onChange={(e) => setStart(e.target.value)} />
+              <input aria-label={`Short ${item.index} end time`} type="range" min={item.videoStart + MIN_EDIT_SECONDS} max={item.sourceEnd} step=".1" value={item.videoEnd} onChange={(e) => setEnd(e.target.value)} />
             </div>
             <div className="short-time-row"><label>Start<input type="number" step=".1" value={item.videoStart.toFixed(1)} onChange={(e) => setStart(e.target.value)} /></label><label>End<input type="number" step=".1" value={item.videoEnd.toFixed(1)} onChange={(e) => setEnd(e.target.value)} /></label></div>
           </section>
