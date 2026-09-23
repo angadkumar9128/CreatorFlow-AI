@@ -15,7 +15,7 @@ export default function ShortsStudioView() {
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("regular");
-  const [shortLength, setShortLength] = useState(DEFAULT_SHORT_SECONDS);
+  const [shortLength, setShortLength] = useState(String(DEFAULT_SHORT_SECONDS));
   const [shorts, setShorts] = useState([]);
   const [notice, setNotice] = useState("");
   const [batch, setBatch] = useState(false);
@@ -51,7 +51,7 @@ export default function ShortsStudioView() {
 
   function generate(nextMode = mode) {
     if (!meta) return setError("Upload a valid source video first.");
-    const length = Math.max(MIN_EDIT_SECONDS, Math.min(MAX_EDIT_SECONDS, Number(shortLength) || DEFAULT_SHORT_SECONDS));
+    const parsedLength = Number(shortLength);\n    const length = Math.max(MIN_EDIT_SECONDS, Math.min(MAX_EDIT_SECONDS, Number.isFinite(parsedLength) && parsedLength > 0 ? parsedLength : DEFAULT_SHORT_SECONDS));
     if (length > meta.duration) return setError("Short duration cannot be longer than the source.");
     const next = nextMode === "random"
       ? createRandomShorts(meta.duration, length, Date.now())
@@ -170,7 +170,12 @@ export default function ShortsStudioView() {
             </div>
           </label>
           <label>Short duration (seconds)
-            <input type="number" min={MIN_EDIT_SECONDS} max={MAX_EDIT_SECONDS} value={shortLength} onChange={(e) => setShortLength(Number(e.target.value) || DEFAULT_SHORT_SECONDS)} />
+            <input type="number" inputMode="decimal" min={MIN_EDIT_SECONDS} max={MAX_EDIT_SECONDS} value={shortLength}
+              onChange={(e) => setShortLength(e.target.value)}
+              onBlur={() => {
+                const n = Number(shortLength);
+                setShortLength(String(Number.isFinite(n) && n >= MIN_EDIT_SECONDS ? Math.min(MAX_EDIT_SECONDS, n) : DEFAULT_SHORT_SECONDS));
+              }} />
           </label>
           <div className="shorts-actions">
             <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
@@ -208,6 +213,8 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
   const activeHandleRef = useRef(null);
 
   useEffect(() => {
+    setStartDraft(item.videoStart.toFixed(1));
+    setEndDraft(item.videoEnd.toFixed(1));
     const video = videoRef.current;
     if (!video) return;
     video.volume = Math.max(0, Math.min(1, item.originalVolume ?? 1));
@@ -317,7 +324,14 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
               <input aria-label={`Short ${item.index} start time`} type="range" min={item.sourceStart} max={item.videoEnd - MIN_EDIT_SECONDS} step=".1" value={item.videoStart} onChange={(e) => setStart(e.target.value)} />
               <input aria-label={`Short ${item.index} end time`} type="range" min={item.videoStart + MIN_EDIT_SECONDS} max={item.sourceEnd} step=".1" value={item.videoEnd} onChange={(e) => setEnd(e.target.value)} />
             </div>
-            <div className="short-time-row"><label>Start<input type="number" step=".1" value={item.videoStart.toFixed(1)} onChange={(e) => setStart(e.target.value)} /></label><label>End<input type="number" step=".1" value={item.videoEnd.toFixed(1)} onChange={(e) => setEnd(e.target.value)} /></label></div>
+            <div className="short-time-row">
+              <label>Start<input type="number" inputMode="decimal" step=".1" min={item.sourceStart} max={item.videoEnd - MIN_EDIT_SECONDS} value={startDraft}
+                onChange={(e) => setStartDraft(e.target.value)}
+                onBlur={() => { const n = Number(startDraft); setStart(Number.isFinite(n) ? n : item.videoStart); }} /></label>
+              <label>End<input type="number" inputMode="decimal" step=".1" min={item.videoStart + MIN_EDIT_SECONDS} max={item.sourceEnd} value={endDraft}
+                onChange={(e) => setEndDraft(e.target.value)}
+                onBlur={() => { const n = Number(endDraft); setEnd(Number.isFinite(n) ? n : item.videoEnd); }} /></label>
+            </div>
           </section>
 
           <section className="short-section">
