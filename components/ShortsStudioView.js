@@ -51,7 +51,8 @@ export default function ShortsStudioView() {
 
   function generate(nextMode = mode) {
     if (!meta) return setError("Upload a valid source video first.");
-    const parsedLength = Number(shortLength);\n    const length = Math.max(MIN_EDIT_SECONDS, Math.min(MAX_EDIT_SECONDS, Number.isFinite(parsedLength) && parsedLength > 0 ? parsedLength : DEFAULT_SHORT_SECONDS));
+    const parsedLength = Number(shortLength);
+    const length = Math.max(MIN_EDIT_SECONDS, Math.min(MAX_EDIT_SECONDS, Number.isFinite(parsedLength) && parsedLength > 0 ? parsedLength : DEFAULT_SHORT_SECONDS));
     if (length > meta.duration) return setError("Short duration cannot be longer than the source.");
     const next = nextMode === "random"
       ? createRandomShorts(meta.duration, length, Date.now())
