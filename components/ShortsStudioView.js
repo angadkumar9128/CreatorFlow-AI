@@ -489,7 +489,7 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
               {item.hashtags?.length > 0 && <div className="short-social-field"><small>Hashtags</small><p>{item.hashtags.join(" ")}</p></div>}
             </section>
           )}
-          {item.captions?.length > 0 && <div className="short-handle-note">AI on-video captions are previewed now and burned into the downloaded Short.</div>
+          {item.captions?.length > 0 && <div className="short-handle-note">AI on-video captions are previewed now and burned into the downloaded Short.</div>}
           {item.error && <div className="alert short-error">{item.error}</div>}
           <div className="short-status"><span className="short-status-text">{item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
