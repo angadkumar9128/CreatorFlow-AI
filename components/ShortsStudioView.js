@@ -199,6 +199,7 @@ export default function ShortsStudioView() {
               <select value={handlePosition} onChange={(e) => setHandlePosition(e.target.value)}>
                 <option value="bottom-right">Bottom right</option>
                 <option value="bottom-left">Bottom left</option>
+                <option value="center">Middle / Center</option>
                 <option value="top-right">Top right</option>
                 <option value="top-left">Top left</option>
               </select>
@@ -208,7 +209,7 @@ export default function ShortsStudioView() {
             </label>
           </div>
           <div className="short-handle-note">Burned into the downloaded Short.</div>
-          <div className="shorts-actions">
+          <div className="shorts-actions shorts-generate-actions">
             <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
             <button className="secondary-button" disabled={!meta || batch} onClick={() => generate("random")}>Regenerate Random</button>
           </div>
@@ -341,6 +342,7 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
   return (
     <article className="short-card">
       <div className="short-card-top">
+        <div className="short-card-mobile-actions"><button className="secondary-button" disabled={batch} onClick={() => download(item)}>{item.renderStatus === "done" ? "Export again" : "Export"}</button></div>
         <div className="short-title"><input type="checkbox" checked={!!item.selected} onChange={() => toggleSelect(item.id)} /><span className="short-number">{item.index}</span><div><strong>Short #{item.index}</strong><div className="muted">{formatTime(item.videoStart)} → {formatTime(item.videoEnd)} · {item.duration.toFixed(1)}s</div></div></div>
         <div className="shorts-actions"><button className="text-button" disabled={batch} onClick={() => reset(item)}>Reset</button><button className="text-button" disabled={batch} onClick={() => remove(item.id)}>Delete</button></div>
       </div>
