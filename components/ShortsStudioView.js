@@ -60,9 +60,21 @@ export default function ShortsStudioView() {
     if (!sourceRef.current || !meta) return setError("Upload a valid source video first.");
     let providerKeys = {};
     try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
-    const geminiKey = String(providerKeys.geminiApiKey || "").trim();
-    if (!geminiKey) return setError("Add your Gemini API key in AI Providers first. The AI Shorts features use your existing free Gemini key.");
-    setAiLoading(true); setAiProgress(0); setError(""); setNotice("");
+    const ownGeminiKey = String(providerKeys.geminiApiKey || "").trim();
+    let geminiKey = ownGeminiKey;
+    if (!geminiKey) {
+      try {
+        const status = await fetch("/api/ai/gemini?action=status", { cache: "no-store" });
+        const data = await status.json();
+        if (!data.configured) {
+          return setError("No Gemini key is configured. Add your own key in AI Providers, or configure GEMINI_API_KEY in Vercel.");
+        }
+        setNotice("Using the app's Vercel Gemini key. Add your own key in AI Providers anytime to use your own quota.");
+      } catch {
+        return setError("Could not check the app Gemini configuration. Add your own Gemini key in AI Providers.");
+      }
+    }
+    setAiLoading(true); setAiProgress(0); setError(""); setNotice((current) => current || "");
     try {
       const result = await analyzeVideoForCreator(sourceRef.current, geminiKey, meta.duration, {
         maxClips: 8,
