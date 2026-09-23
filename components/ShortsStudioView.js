@@ -294,7 +294,13 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
   const musicWidth = item.music ? Math.min(100, item.duration / item.music.duration * 100) : 0;
   const musicLeft = item.music ? item.music.start / item.music.duration * 100 : 0;
 
-  const setStart = (v) => patch(item.id, { videoStart: Math.max(item.sourceStart, Math.min(Number(v), item.videoEnd - MIN_EDIT_SECONDS)) });
+  const setStart = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return;
+    const nextStart = Math.max(0, Math.min(n, item.videoEnd - MIN_EDIT_SECONDS));
+    const nextSourceStart = nextStart < item.sourceStart ? 0 : item.sourceStart;
+    patch(item.id, { sourceStart: nextSourceStart, videoStart: nextStart });
+  };
   const setEnd = (v) => patch(item.id, { videoEnd: Math.min(item.sourceEnd, Math.max(Number(v), item.videoStart + MIN_EDIT_SECONDS)) });
 
   function setTimelineFromPointer(clientX, handle) {
@@ -378,15 +384,24 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
           </section>
 
           <section className="short-section">
-            <div className="short-section-head"><strong>Music</strong><span>{item.music ? `${item.music.duration.toFixed(1)}s` : "None"}</span></div>
+            <div className="short-section-head"><strong>Music</strong><span>{item.music ? formatTime(item.music.duration) : "None"}</span></div>
             {!item.music ? <input type="file" accept="audio/*" onChange={(e) => addMusic(item.id, e.target.files?.[0])} /> : <>
               <div className="short-music-upload"><span className="muted">{item.music.file.name}</span><button className="text-button" onClick={() => removeMusic(item.id)}>Remove</button></div>
               <label>Music position<input type="range" min="0" max={musicMax} step=".1" value={Math.min(item.music.start, musicMax)} onChange={(e) => updateMusic(item.id, { start: Number(e.target.value) })} /></label>
               <div className="music-window"><span style={{ left: `${musicLeft}%`, width: `${musicWidth}%` }} /></div>
               <div className="short-handle-note">Slide to choose music start.</div>
               <div className="short-volume-row">
-                <label>Music volume {Math.round(item.music.volume * 100)}%<input type="range" min="0" max="1" step=".05" value={item.music.volume} onChange={(e) => updateMusic(item.id, { volume: Number(e.target.value) })} /></label>
-                <label>Original audio {Math.round((item.originalVolume ?? 1) * 100)}%<input type="range" min="0" max="1" step=".05" value={item.originalVolume ?? 1} onChange={(e) => patch(item.id, { originalVolume: Number(e.target.value) })} /></label>
+                  <label>Music volume {Math.round(item.music.volume * 100)}%
+                  <input type="range" min="0" max="1" step=".05" value={item.music.volume} onChange={(e) => updateMusic(item.id, { volume: Number(e.target.value) })} />
+                </label>
+                <label>Original audio {Math.round((item.originalVolume ?? 1) * 100)}%
+                  <input type="range" min="0" max="1" step=".05" value={item.originalVolume ?? 1}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (videoRef.current) videoRef.current.volume = value;
+                      patch(item.id, { originalVolume: value });
+                    }} />
+                </label>
               </div>
               {item.music.duration < item.duration && <div className="segmented-control"><button aria-pressed={item.music.mode === "trim"} onClick={() => updateMusic(item.id, { mode: "trim" })}>Silence after song</button><button aria-pressed={item.music.mode === "loop"} onClick={() => updateMusic(item.id, { mode: "loop" })}>Loop music</button></div>}
             </>}
