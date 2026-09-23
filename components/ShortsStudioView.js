@@ -78,7 +78,7 @@ export default function ShortsStudioView() {
     try {
       const result = await analyzeVideoForCreator(sourceRef.current, geminiKey, meta.duration, {
         maxClips: 8,
-        targetLength: Math.min(60, Math.max(20, Number(shortLength) || 45)),
+        targetLength: Math.min(39, Math.max(15, Number(shortLength) || 30)),
         onProgress: ({ ratio = 0, stage }) => {
           setAiProgress(ratio);
           setNotice(stage === "uploading" ? "Uploading video to Gemini…" : stage === "processing" ? "Gemini is processing the video…" : stage === "analyzing" ? "AI is finding the strongest moments, captions and hooks…" : "Finishing AI analysis…");
@@ -205,7 +205,7 @@ export default function ShortsStudioView() {
   }
 
   function reset(item) {
-    patch(item.id, { videoStart: item.sourceStart, videoEnd: item.sourceEnd, music: null, originalVolume: 1, captions: [], hooks: [] });
+    patch(item.id, { videoStart: item.sourceStart, videoEnd: item.sourceEnd, music: null, originalVolume: 1, captions: [], hooks: [], title: "", description: "", hashtags: [], aiReason: "" });
   }
 
   return (
@@ -475,7 +475,21 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
           </section>
 
           {item.hooks?.length > 0 && <section className="short-ai-hook-section"><strong>AI Hook ideas</strong><div className="short-hook-list">{item.hooks.slice(0, 3).map((hook, i) => <button key={i} className="short-hook-chip" onClick={() => navigator.clipboard?.writeText(hook.text)}>{hook.text}</button>)}</div></section>}
-          {item.captions?.length > 0 && <div className="short-handle-note">AI captions are previewed now and burned into the downloaded Short.</div>}
+          {(item.title || item.description || item.hashtags?.length > 0) && (
+            <section className="short-social-package">
+              <div className="short-social-head">
+                <div><strong>AI Instagram Caption</strong><span>Title + description + relevant discovery hashtags</span></div>
+                <button className="secondary-button" onClick={() => {
+                  const text = [item.title && `Title: ${item.title}`, item.description && `Description: ${item.description}`, item.hashtags?.length ? item.hashtags.join(" ") : ""].filter(Boolean).join("\n\n");
+                  navigator.clipboard?.writeText(text);
+                }}>Copy All</button>
+              </div>
+              {item.title && <div className="short-social-field"><small>Title</small><strong>{item.title}</strong></div>}
+              {item.description && <div className="short-social-field"><small>Description</small><p>{item.description}</p></div>}
+              {item.hashtags?.length > 0 && <div className="short-social-field"><small>Hashtags</small><p>{item.hashtags.join(" ")}</p></div>}
+            </section>
+          )}
+          {item.captions?.length > 0 && <div className="short-handle-note">AI on-video captions are previewed now and burned into the downloaded Short.</div>
           {item.error && <div className="alert short-error">{item.error}</div>}
           <div className="short-status"><span className="short-status-text">{item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
