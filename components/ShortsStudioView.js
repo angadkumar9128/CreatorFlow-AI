@@ -38,7 +38,7 @@ export default function ShortsStudioView() {
   }, [revokeSource]);
 
   function uploadSource(file) {
-    setError(""); setNotice(""); setShorts([]); setMeta(null);
+    setError(""); setNotice(""); setShorts([]); setMeta(null); setAiResult(null);
     if (!file) return;
     if (!file.type.startsWith("video/")) return setError("Please upload a video file.");
     revokeSource();
@@ -98,7 +98,7 @@ export default function ShortsStudioView() {
     const next = nextMode === "random"
       ? createRandomShorts(meta.duration, length, Date.now())
       : createRegularShorts(meta.duration, length);
-    setMode(nextMode); setShorts(next); setError("");
+    setMode(nextMode); setShorts(next); setAiResult(null); setError("");
     setNotice(next.length ? `${next.length} Shorts created. Editing does not encode the source.` : "No Shorts could be created.");
   }
 
