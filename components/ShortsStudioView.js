@@ -227,7 +227,7 @@ export default function ShortsStudioView() {
       </div>}
 
       <div className="shorts-list">
-        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} sourceDuration={meta?.duration || 0} creatorHandle={creatorHandle} handlePosition={handlePosition} handleOpacity={handleOpacity} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
+        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} sourceDuration={meta?.duration || 0} expandEarlier={expandEarlier} creatorHandle={creatorHandle} handlePosition={handlePosition} handleOpacity={handleOpacity} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
       </div>
     </section>
   );
@@ -237,7 +237,7 @@ function Meta({ label, value }) {
   return <div className="shorts-meta-item"><span>{label}</span><strong title={value}>{value}</strong></div>;
 }
 
-function ShortCard({ item, sourceUrl, sourceDuration, creatorHandle, handlePosition, handleOpacity, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
+function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHandle, handlePosition, handleOpacity, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
   const videoRef = useRef(null);
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
