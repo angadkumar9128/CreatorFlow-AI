@@ -209,6 +209,7 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    video.volume = Math.max(0, Math.min(1, item.originalVolume ?? 1));
     video.pause(); video.currentTime = item.videoStart; setPlaying(false);
     if (musicRef.current && item.music) { musicRef.current.pause(); musicRef.current.currentTime = item.music.start; }
   }, [item.videoStart, item.videoEnd, item.music?.start]);
@@ -221,6 +222,14 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
     if (musicRef.current && item.music) musicRef.current.currentTime = item.music.start;
     Promise.all([video.play(), item.music ? musicRef.current?.play() : Promise.resolve()]).then(() => setPlaying(true)).catch(() => setPlaying(false));
   }
+
+  useEffect(() => {
+    const audio = musicRef.current;
+    if (!audio || !item.music || item.music.mode !== "loop") return;
+    const onEnded = () => { audio.currentTime = item.music.start; audio.play().catch(() => {}); };
+    audio.addEventListener("ended", onEnded);
+    return () => audio.removeEventListener("ended", onEnded);
+  }, [item.music]);
 
   function timeUpdate() {
     const video = videoRef.current;
@@ -249,7 +258,7 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
 
       <div className="short-card-main">
         <div className="short-card-preview">
-          <video ref={videoRef} src={sourceUrl} muted={!item.music} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
+          <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
           {item.music && <audio ref={musicRef} src={item.music.url} preload="metadata" />}
           <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>
         </div>
