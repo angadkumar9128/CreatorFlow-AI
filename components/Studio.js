@@ -8,11 +8,12 @@ import { W, H, THEMES, loadImage, timeline, drawFrame, recordReel } from "@/lib/
 import { GENRES } from "@/lib/audio";
 import { saveFile, instagramCheck, isIOS, isMobile } from "@/lib/download";
 import { toInstagramMp4, looksInstagramReady, preloadFFmpeg } from "@/lib/remux";
+import ShortsStudioView from "@/components/ShortsStudioView";
 
 const IMAGE_W = 1080;
 const IMAGE_H = 1350;
 
-const NAV_ITEMS = ["Dashboard", "Generate", "My Content", "Calendar", "Analytics", "AI Providers", "Settings"];
+const NAV_ITEMS = ["Dashboard", "Generate", "Shorts Studio", "My Content", "Calendar", "Analytics", "AI Providers", "Settings"];
 const TYPES = [
   { id: "video", label: "Reel", note: "10-60s vertical reel from generated scenes" },
   { id: "image", label: "Image", note: "1080x1350 feed post or cover image" },
@@ -697,14 +698,15 @@ export default function Studio() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Generate Today</p>
-            <h1>{activeView === "Generate" ? "Create reels, images and memes" : activeView}</h1>
+            <h1>{activeView === "Generate" ? "Create reels, images and memes" : activeView === "Shorts Studio" ? "Turn long videos into Shorts" : activeView}</h1>
           </div>
-          <button className="primary-button" disabled={busy || !canGenerate} onClick={() => produce()}>
+          {activeView === "Generate" && <button className="primary-button" disabled={busy || !canGenerate} onClick={() => produce()}>
             {busy ? "Generating" : "Generate"}
-          </button>
+          </button>}
         </header>
 
         {activeView === "Dashboard" && <Dashboard history={history} providers={providers} />}
+        {activeView === "Shorts Studio" && <ShortsStudioView />}
         {activeView === "Generate" && (
           <div className="generate-grid">
             <section className="wizard">
