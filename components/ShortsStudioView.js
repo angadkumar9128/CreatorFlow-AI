@@ -211,6 +211,8 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const activeHandleRef = useRef(null);
+  const [startDraft, setStartDraft] = useState(item.videoStart.toFixed(1));
+  const [endDraft, setEndDraft] = useState(item.videoEnd.toFixed(1));
 
   useEffect(() => {
     setStartDraft(item.videoStart.toFixed(1));
