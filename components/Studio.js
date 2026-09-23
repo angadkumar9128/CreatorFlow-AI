@@ -995,7 +995,7 @@ export default function Studio() {
         {activeView === "My Content" && <ContentList history={history} />}
         {activeView === "Calendar" && <Placeholder title="Calendar" body="Daily generation planning is prepared as a local view in this UI-only pass." />}
         {activeView === "Analytics" && <Placeholder title="Analytics" body="Local stats summarize generated and saved content in this browser." />}
-        {activeView === "AI Providers" && <Providers providers={providers} />}
+        {activeView === "AI Providers" && <Providers providers={providers} providerKeys={providerKeys} onProviderKey={updateProviderKey} />}
         {activeView === "Settings" && (
           <Placeholder title="Settings" body="Handle, language and generation preferences are edited directly in the Generate view." />
         )}
@@ -1211,23 +1211,90 @@ function ContentList({ history, compact = false }) {
   );
 }
 
-function Providers({ providers }) {
+function Providers({ providers, providerKeys, onProviderKey }) {
+  const [appGeminiConfigured, setAppGeminiConfigured] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/ai/gemini?action=status", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => setAppGeminiConfigured(Boolean(data.configured)))
+      .catch(() => setAppGeminiConfigured(false));
+  }, []);
+
+  const fields = [
+    ["geminiApiKey", "Gemini API Key", "Used for AI Shorts, captions and hooks. Your key overrides the app key."],
+    ["groqApiKey", "Groq API Key", "Optional personal key for text generation."],
+    ["openrouterApiKey", "OpenRouter API Key", "Optional personal key for text generation."],
+    ["cerebrasApiKey", "Cerebras API Key", "Optional personal key for text generation."],
+    ["togetherApiKey", "Together API Key", "Optional personal key for supported image/text fallbacks."],
+    ["cloudflareAccountId", "Cloudflare Account ID", "Optional account ID for Cloudflare Workers AI."],
+    ["cloudflareApiToken", "Cloudflare API Token", "Optional token for Cloudflare Workers AI."],
+    ["pollinationsToken", "Pollinations Token", "Optional token for Pollinations image generation."],
+  ];
+
+  function clearPersonalKeys() {
+    fields.forEach(([key]) => onProviderKey(key, ""));
+  }
+
   return (
-    <section className="panel">
+    <section className="panel provider-settings">
       <div className="panel-head">
         <span>AI</span>
-        <h2>Providers</h2>
+        <div>
+          <h2>AI Providers</h2>
+          <p className="muted">Use your own API keys when you have them. Keys are saved only in this browser.</p>
+        </div>
       </div>
+
+      <div className="provider-fallback-card">
+        <div>
+          <strong>CreatorFlow app Gemini key</strong>
+          <span>{appGeminiConfigured ? "Available as the default Gemini fallback" : "Not configured on Vercel"}</span>
+        </div>
+        <b>{appGeminiConfigured ? "READY" : "NOT SET"}</b>
+      </div>
+
+      <div className="provider-config-grid">
+        {fields.map(([key, label, description]) => (
+          <label className="provider-config-item" key={key}>
+            <span>{label}</span>
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder={providerKeys[key] ? "Saved — enter to replace" : "Paste your API key (optional)"}
+              value={providerKeys[key] || ""}
+              onChange={(event) => onProviderKey(key, event.target.value)}
+            />
+            <small>{description}</small>
+            <em>{providerKeys[key] ? "Your key is configured" : "Using app/default key when available"}</em>
+          </label>
+        ))}
+      </div>
+
+      <div className="provider-actions">
+        <button className="secondary-button" onClick={clearPersonalKeys}>Clear my saved keys</button>
+        <span className="muted">Changes save automatically. Personal keys take priority over the app fallback.</span>
+      </div>
+
+      <div className="provider-security-note">
+        <strong>Security note</strong>
+        <span>
+          Personal keys are stored in browser localStorage and are sent only when you explicitly use a provider.
+          Do not save a personal production key on a shared computer. The Vercel Gemini key stays server-side for the
+          app fallback.
+        </span>
+      </div>
+
       <div className="provider-grid">
         {["Groq", "Gemini", "OpenRouter", "Cloudflare Workers AI", "Together", "Pollinations"].map((provider) => (
           <div key={provider}>
             <strong>{provider}</strong>
             <span>
               {providers.map((item) => item.toLowerCase()).includes(provider.toLowerCase())
-                ? "Configured for text"
+                ? "Available for text"
                 : provider === "Pollinations"
                   ? "Image fallback"
-                  : "Configured by environment"}
+                  : "Optional personal configuration"}
             </span>
           </div>
         ))}
