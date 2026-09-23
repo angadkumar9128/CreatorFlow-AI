@@ -380,7 +380,7 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
                 onBlur={() => { const n = Number(endDraft); setEnd(Number.isFinite(n) ? n : item.videoEnd); }} /></label>
             </div>
             {item.sourceStart > 0 && <button className="text-button" disabled={batch || !sourceDuration} onClick={() => expandEarlier(item)}>← Extend start to original video</button>}
-            {item.sourceStart > 0 && <div className="short-handle-note">Need an earlier moment? Extend this Short to the original video.</div>
+            {item.sourceStart > 0 && <div className="short-handle-note">Need an earlier moment? Extend this Short to the original video.</div>}
           </section>
 
           <section className="short-section">
