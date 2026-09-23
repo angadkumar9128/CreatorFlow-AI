@@ -19,6 +19,9 @@ export default function ShortsStudioView() {
   const [shorts, setShorts] = useState([]);
   const [notice, setNotice] = useState("");
   const [batch, setBatch] = useState(false);
+  const [creatorHandle, setCreatorHandle] = useState("");
+  const [handlePosition, setHandlePosition] = useState("bottom-right");
+  const [handleOpacity, setHandleOpacity] = useState(0.9);
 
   const revokeSource = useCallback(() => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
@@ -76,6 +79,12 @@ export default function ShortsStudioView() {
     }));
   }
 
+  function expandEarlier(item) {
+    if (!meta || item.sourceStart <= 0) return;
+    patch(item.id, { sourceStart: 0 });
+    setNotice(`Short #${item.index} can now start earlier from the original video.`);
+  }
+
   function removeShort(id) {
     setShorts((prev) => prev.filter((item) => item.id !== id));
   }
@@ -122,6 +131,9 @@ export default function ShortsStudioView() {
         musicMode: item.music?.mode || "trim",
         musicVolume: item.music?.volume ?? 1,
         originalVolume: item.originalVolume ?? 1,
+        creatorHandle: creatorHandle.trim(),
+        handlePosition,
+        handleOpacity,
         onProgress: (p) => setShorts((prev) => prev.map((x) => x.id === item.id ? { ...x, renderProgress: p.ratio || 0, renderStatus: p.stage === "converting" ? "converting" : "rendering" } : x)),
       });
       const url = URL.createObjectURL(blob);
@@ -178,6 +190,24 @@ export default function ShortsStudioView() {
                 setShortLength(String(Number.isFinite(n) && n >= MIN_EDIT_SECONDS ? Math.min(MAX_EDIT_SECONDS, n) : DEFAULT_SHORT_SECONDS));
               }} />
           </label>
+          <label>Creator handle (optional)
+            <input type="text" inputMode="text" maxLength={40} placeholder="@yourusername" value={creatorHandle}
+              onChange={(e) => setCreatorHandle(e.target.value.slice(0, 40))} />
+          </label>
+          <div className="short-time-row">
+            <label>Handle position
+              <select value={handlePosition} onChange={(e) => setHandlePosition(e.target.value)}>
+                <option value="bottom-right">Bottom right</option>
+                <option value="bottom-left">Bottom left</option>
+                <option value="top-right">Top right</option>
+                <option value="top-left">Top left</option>
+              </select>
+            </label>
+            <label>Handle opacity {Math.round(handleOpacity * 100)}%
+              <input type="range" min="0.35" max="1" step="0.05" value={handleOpacity} onChange={(e) => setHandleOpacity(Number(e.target.value))} />
+            </label>
+          </div>
+          <div className="short-handle-note">Burned into the downloaded Short.</div>
           <div className="shorts-actions">
             <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
             <button className="secondary-button" disabled={!meta || batch} onClick={() => generate("random")}>Regenerate Random</button>
@@ -197,7 +227,7 @@ export default function ShortsStudioView() {
       </div>}
 
       <div className="shorts-list">
-        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
+        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} sourceDuration={meta?.duration || 0} creatorHandle={creatorHandle} handlePosition={handlePosition} handleOpacity={handleOpacity} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
       </div>
     </section>
   );
@@ -207,7 +237,7 @@ function Meta({ label, value }) {
   return <div className="shorts-meta-item"><span>{label}</span><strong title={value}>{value}</strong></div>;
 }
 
-function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
+function ShortCard({ item, sourceUrl, sourceDuration, creatorHandle, handlePosition, handleOpacity, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
   const videoRef = useRef(null);
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -233,6 +263,13 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
     if (musicRef.current && item.music) musicRef.current.currentTime = item.music.start;
     Promise.all([video.play(), item.music ? musicRef.current?.play() : Promise.resolve()]).then(() => setPlaying(true)).catch(() => setPlaying(false));
   }
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.volume = Math.max(0, Math.min(1, Number(item.originalVolume) || 0));
+    const audio = musicRef.current;
+    if (audio && item.music) audio.volume = Math.max(0, Math.min(1, Number(item.music.volume) || 0));
+  }, [item.originalVolume, item.music?.volume]);
 
   useEffect(() => {
     const audio = musicRef.current;
@@ -306,6 +343,7 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
         <div className="short-card-preview">
           <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
           {item.music && <audio ref={musicRef} src={item.music.url} preload="metadata" />}
+          {creatorHandle.trim() && <div className={`short-creator-handle ${handlePosition}`} style={{ opacity: handleOpacity }}>{creatorHandle.trim()}</div>}
           <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>
         </div>
 
@@ -335,6 +373,8 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
                 onChange={(e) => setEndDraft(e.target.value)}
                 onBlur={() => { const n = Number(endDraft); setEnd(Number.isFinite(n) ? n : item.videoEnd); }} /></label>
             </div>
+            {item.sourceStart > 0 && <button className="text-button" disabled={batch || !sourceDuration} onClick={() => expandEarlier(item)}>← Extend start to original video</button>}
+            {item.sourceStart > 0 && <div className="short-handle-note">Need an earlier moment? Extend this Short to the original video.</div>
           </section>
 
           <section className="short-section">
@@ -343,6 +383,7 @@ function ShortCard({ item, sourceUrl, batch, patch, reset, remove, addMusic, upd
               <div className="short-music-upload"><span className="muted">{item.music.file.name}</span><button className="text-button" onClick={() => removeMusic(item.id)}>Remove</button></div>
               <label>Music position<input type="range" min="0" max={musicMax} step=".1" value={Math.min(item.music.start, musicMax)} onChange={(e) => updateMusic(item.id, { start: Number(e.target.value) })} /></label>
               <div className="music-window"><span style={{ left: `${musicLeft}%`, width: `${musicWidth}%` }} /></div>
+              <div className="short-handle-note">Slide to choose music start.</div>
               <div className="short-volume-row">
                 <label>Music volume {Math.round(item.music.volume * 100)}%<input type="range" min="0" max="1" step=".05" value={item.music.volume} onChange={(e) => updateMusic(item.id, { volume: Number(e.target.value) })} /></label>
                 <label>Original audio {Math.round((item.originalVolume ?? 1) * 100)}%<input type="range" min="0" max="1" step=".05" value={item.originalVolume ?? 1} onChange={(e) => patch(item.id, { originalVolume: Number(e.target.value) })} /></label>
