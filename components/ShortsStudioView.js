@@ -78,7 +78,6 @@ export default function ShortsStudioView() {
     try {
       const result = await analyzeVideoForCreator(sourceRef.current, geminiKey, meta.duration, {
         maxClips: 8,
-        targetLength: Math.min(39, Math.max(15, Number(shortLength) || 30)),
         onProgress: ({ ratio = 0, stage }) => {
           setAiProgress(ratio);
           setNotice(stage === "uploading" ? "Uploading video to Gemini…" : stage === "processing" ? "Gemini is processing the video…" : stage === "analyzing" ? "AI is finding the strongest moments, captions and hooks…" : "Finishing AI analysis…");
