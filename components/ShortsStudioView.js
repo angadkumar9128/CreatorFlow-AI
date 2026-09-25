@@ -8,29 +8,6 @@ import { analyzeVideoForCreator } from "@/lib/ai-shorts";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
-function loadYouTubeIframeApi() {
-  if (typeof window === "undefined") return Promise.reject(new Error("YouTube Player API is only available in the browser."));
-  if (window.YT?.Player) return Promise.resolve(window.YT);
-  if (window.__creatorFlowYouTubeApiPromise) return window.__creatorFlowYouTubeApiPromise;
-  window.__creatorFlowYouTubeApiPromise = new Promise((resolve, reject) => {
-    const ready = () => window.YT?.Player ? resolve(window.YT) : reject(new Error("YouTube Player API is unavailable."));
-    window.__creatorFlowYouTubeApiReady = ready;
-    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-      const script = document.createElement("script");
-      script.src = "https://www.youtube.com/iframe_api";
-      script.async = true;
-      script.onerror = () => reject(new Error("Could not load the YouTube Player API."));
-      document.head.appendChild(script);
-    }
-  });
-  const previous = window.onYouTubeIframeAPIReady;
-  window.onYouTubeIframeAPIReady = () => {
-    previous?.();
-    window.__creatorFlowYouTubeApiReady?.();
-  };
-  return window.__creatorFlowYouTubeApiPromise;
-}
-
 export default function ShortsStudioView() {
   const sourceRef = useRef(null);
   const sourceUrlRef = useRef(null);
@@ -52,9 +29,6 @@ export default function ShortsStudioView() {
   const [youtubeLoading, setYoutubeLoading] = useState(false);
   const [aiProgress, setAiProgress] = useState(0);
   const [aiResult, setAiResult] = useState(null);
-  const [youtubeVideoId, setYoutubeVideoId] = useState("");
-  const youtubePlayerRef = useRef(null);
-  const youtubeIframeRef = useRef(null);
 
   const revokeSource = useCallback(() => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
@@ -64,14 +38,7 @@ export default function ShortsStudioView() {
   useEffect(() => () => {
     revokeSource();
     musicUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    youtubePlayerRef.current?.destroy?.();
-    youtubePlayerRef.current = null;
   }, [revokeSource]);
-
-  useEffect(() => {
-    if (sourceMode !== "youtube" || !youtubeVideoId || sourceUrl) return undefined;
-    return undefined;
-  }, [sourceMode, youtubeVideoId, sourceUrl]);
 
   function uploadSource(file) {
     setSourceMode("upload");
@@ -147,7 +114,6 @@ export default function ShortsStudioView() {
     setShorts([]);
     setMeta(null);
     setAiResult(null);
-    setYoutubeVideoId(videoId);
     try {
       const res = await fetch("/api/youtube_download", {
         method: "POST",
