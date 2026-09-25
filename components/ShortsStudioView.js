@@ -8,6 +8,29 @@ import { analyzeVideoForCreator } from "@/lib/ai-shorts";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
+function loadYouTubeIframeApi() {
+  if (typeof window === "undefined") return Promise.reject(new Error("YouTube Player API is only available in the browser."));
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (window.__creatorFlowYouTubeApiPromise) return window.__creatorFlowYouTubeApiPromise;
+  window.__creatorFlowYouTubeApiPromise = new Promise((resolve, reject) => {
+    const ready = () => window.YT?.Player ? resolve(window.YT) : reject(new Error("YouTube Player API is unavailable."));
+    window.__creatorFlowYouTubeApiReady = ready;
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      script.onerror = () => reject(new Error("Could not load the YouTube Player API."));
+      document.head.appendChild(script);
+    }
+  });
+  const previous = window.onYouTubeIframeAPIReady;
+  window.onYouTubeIframeAPIReady = () => {
+    previous?.();
+    window.__creatorFlowYouTubeApiReady?.();
+  };
+  return window.__creatorFlowYouTubeApiPromise;
+}
+
 export default function ShortsStudioView() {
   const sourceRef = useRef(null);
   const sourceUrlRef = useRef(null);
@@ -31,7 +54,7 @@ export default function ShortsStudioView() {
   const [aiResult, setAiResult] = useState(null);
   const [youtubeVideoId, setYoutubeVideoId] = useState("");
   const youtubePlayerRef = useRef(null);
-  const youtubePlayerContainerRef = useRef(null);
+  const youtubeIframeRef = useRef(null);
 
   const revokeSource = useCallback(() => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
