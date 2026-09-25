@@ -86,7 +86,7 @@ def download_youtube(url, workdir):
         "retries": 3,
         "fragment_retries": 3,
         "extractor_retries": 3,
-        "extractor_args": {"youtube": {"player_client": ["tv", "web_safari"]}},
+        "extractor_args": {"youtube": {"player_client": ["tv", "web_safari", "web_embedded"]}},
     }
 
     # imageio-ffmpeg supplies an actual ffmpeg binary when present.
