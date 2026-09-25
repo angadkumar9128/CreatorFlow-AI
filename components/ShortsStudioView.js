@@ -120,7 +120,7 @@ export default function ShortsStudioView() {
       youtubePlayerRef.current?.destroy?.();
       youtubePlayerRef.current = null;
     };
-  }, [sourceMode, youtubeVideoId, youtubeUrl]);
+  }, [sourceMode, youtubeVideoId]);
 
   function uploadSource(file) {
     setSourceMode("upload");
