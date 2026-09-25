@@ -5,7 +5,6 @@ import { createRandomShorts, createRegularShorts, createAIShorts, DEFAULT_SHORT_
 import { exportShort } from "@/lib/shorts-export";
 import { saveFile } from "@/lib/download";
 import { analyzeVideoForCreator } from "@/lib/ai-shorts";
-import { retrieveYouTubeVideo } from "@/lib/youtube-retrieval";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
@@ -30,6 +29,9 @@ export default function ShortsStudioView() {
   const [youtubeLoading, setYoutubeLoading] = useState(false);
   const [aiProgress, setAiProgress] = useState(0);
   const [aiResult, setAiResult] = useState(null);
+  const [youtubeVideoId, setYoutubeVideoId] = useState("");
+  const youtubePlayerRef = useRef(null);
+  const youtubePlayerContainerRef = useRef(null);
 
   const revokeSource = useCallback(() => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
@@ -39,7 +41,86 @@ export default function ShortsStudioView() {
   useEffect(() => () => {
     revokeSource();
     musicUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    youtubePlayerRef.current?.destroy?.();
+    youtubePlayerRef.current = null;
   }, [revokeSource]);
+
+  useEffect(() => {
+    if (sourceMode !== "youtube" || !youtubeVideoId || !youtubePlayerContainerRef.current) return undefined;
+    let cancelled = false;
+
+    const createPlayer = () => {
+      if (cancelled || !window.YT || !youtubePlayerContainerRef.current) return;
+      youtubePlayerRef.current?.destroy?.();
+      youtubePlayerRef.current = new window.YT.Player(youtubePlayerContainerRef.current, {
+        width: "100%",
+        height: "100%",
+        videoId: youtubeVideoId,
+        playerVars: { playsinline: 1, rel: 0, origin: window.location.origin },
+        events: {
+          onReady: (event) => {
+            if (cancelled) return;
+            const duration = Number(event.target.getDuration?.() || 0);
+            if (!duration) {
+              setError("YouTube did not expose the video duration yet. Press play once and try again.");
+              return;
+            }
+            const check = validateSourceDuration(duration);
+            if (!check.ok) {
+              setMeta(null);
+              setShorts([]);
+              setError(check.error);
+              return;
+            }
+            const nextMeta = {
+              name: "YouTube video (" + youtubeVideoId + ")",
+              size: 0,
+              duration,
+              width: 0,
+              height: 0,
+              sourceType: "youtube",
+              youtubeUrl: youtubeUrl.trim(),
+            };
+            setMeta(nextMeta);
+            setError("");
+            const length = Math.min(DEFAULT_SHORT_SECONDS, duration);
+            const generated = createRegularShorts(duration, length);
+            setShorts(generated);
+            setMode("regular");
+            setNotice("YouTube video loaded. Created " + generated.length + " timestamp-based Shorts. No video is downloaded.");
+          },
+          onError: () => {
+            if (!cancelled) setError("YouTube could not load this video in the embedded player.");
+          },
+        },
+      });
+    };
+
+    if (window.YT?.Player) {
+      createPlayer();
+      return () => { cancelled = true; youtubePlayerRef.current?.destroy?.(); youtubePlayerRef.current = null; };
+    }
+
+    const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+    const script = existing || document.createElement("script");
+    const previousReady = window.onYouTubeIframeAPIReady;
+    if (!existing) {
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      createPlayer();
+    };
+
+    return () => {
+      cancelled = true;
+      if (window.onYouTubeIframeAPIReady === createPlayer) window.onYouTubeIframeAPIReady = previousReady;
+      youtubePlayerRef.current?.destroy?.();
+      youtubePlayerRef.current = null;
+    };
+  }, [sourceMode, youtubeVideoId, youtubeUrl]);
 
   function uploadSource(file) {
     setSourceMode("upload");
@@ -102,94 +183,26 @@ export default function ShortsStudioView() {
     });
   }
 
-  async function runYouTubeStudio() {
+  function runYouTubeStudio() {
     const input = youtubeUrl.trim();
-    if (!input) return setError("Paste a public YouTube URL first.");
+    const videoId = extractYouTubeVideoId(input);
+    if (!videoId) return setError("Paste a valid public YouTube URL first.");
+    setSourceMode("youtube");
     setYoutubeLoading(true);
     setAiLoading(false);
     setAiProgress(0);
     setError("");
-    setNotice("Retrieving the YouTube video…");
+    setNotice("Loading the YouTube player…");
     setShorts([]);
+    setMeta(null);
     setAiResult(null);
-    try {
-      const result = await retrieveYouTubeVideo(input, {
-        onProgress: ({ ratio = 0, stage }) => {
-          setAiProgress(ratio);
-          setNotice(stage === "retrieving" ? "Connecting to the YouTube media retriever…" : stage === "downloading" ? "Downloading the source video…" : "Preparing the video in CreatorFlow-AI…");
-        },
-      });
-      const nextMeta = await loadSourceFile(result.file, result.title, "youtube", result.youtubeUrl);
-      const length = Math.min(DEFAULT_SHORT_SECONDS, nextMeta.duration);
-      const generated = createRegularShorts(nextMeta.duration, length);
-      if (!generated.length) throw new Error("The retrieved YouTube video is too short to create Shorts.");
-      setShorts(generated);
-      setMode("regular");
-      setNotice(`YouTube video retrieved successfully. Created ${generated.length} editable Shorts. Export works like an uploaded video.`);
-    } catch (e) {
-      setError(e?.message || "YouTube video retrieval failed.");
-    } finally {
-      setYoutubeLoading(false);
-      setAiProgress(1);
-    }
+    setYoutubeVideoId(videoId);
+    setYoutubeLoading(false);
   }
 
-  async function runYouTubeAIStudio() {
-    const input = youtubeUrl.trim();
-    if (!input) return setError("Paste a public YouTube URL first.");
-    setYoutubeLoading(true);
-    setAiLoading(true);
-    setAiProgress(0);
-    setError("");
-    setNotice("Retrieving the YouTube source for AI Auto Shorts…");
-    setShorts([]);
-    setAiResult(null);
-    try {
-      const result = await retrieveYouTubeVideo(input, {
-        onProgress: ({ ratio = 0, stage }) => {
-          setAiProgress(ratio * 0.35);
-          setNotice(stage === "retrieving" ? "Connecting to the YouTube media retriever…" : stage === "downloading" ? "Downloading the source video…" : "Preparing the source for AI…");
-        },
-      });
-      const nextMeta = await loadSourceFile(result.file, result.title, "youtube", result.youtubeUrl);
-
-      let providerKeys = {};
-      try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
-      let geminiKey = String(providerKeys.geminiApiKey || "").trim();
-      if (!geminiKey) {
-        const status = await fetch("/api/ai/gemini?action=status", { cache: "no-store" });
-        const data = await status.json().catch(() => ({}));
-        if (!data.configured) throw new Error("AI Auto Shorts needs a Gemini key. Add your own key in AI Providers, or configure GEMINI_API_KEY in Vercel.");
-        setNotice("Source retrieved. Gemini is analyzing it for AI Auto Shorts…");
-      }
-
-      const ai = await analyzeVideoForCreator(result.file, geminiKey, nextMeta.duration, {
-        maxClips: 8,
-        onProgress: ({ ratio = 0, stage }) => {
-          setAiProgress(0.35 + ratio * 0.65);
-          setNotice(stage === "uploading" ? "Uploading the YouTube source to Gemini…" : stage === "processing" ? "Gemini is processing the source…" : stage === "analyzing" ? "Gemini is finding the strongest moments…" : "Finishing AI Auto Shorts…");
-        },
-      });
-      const generated = createAIShorts(nextMeta.duration, ai.clips);
-      const withAI = generated.map((item) => ({
-        ...item,
-        captions: ai.captions.filter((caption) => caption.end > item.videoStart && caption.start < item.videoEnd),
-        hooks: ai.hooks || [],
-      }));
-      if (!withAI.length) throw new Error("Gemini could not find usable Shorts in this YouTube video.");
-      setShorts(withAI);
-      setAiResult(ai);
-      setMode("ai");
-      setNotice(`AI created ${withAI.length} Shorts from the retrieved YouTube source. You can edit and export them normally.`);
-    } catch (e) {
-      setError(e?.message || "YouTube AI Auto Shorts failed.");
-    } finally {
-      setYoutubeLoading(false);
-      setAiLoading(false);
-      setAiProgress(1);
-    }
+  function runYouTubeAIStudio() {
+    setError("AI Auto Shorts is not available for YouTube iframe mode. Upload the video to use Gemini AI analysis and MP4 export.");
   }
-
   async function runAIStudio() {
     if (!sourceRef.current || !meta) return setError("Upload a valid source video first.");
     let providerKeys = {};
@@ -363,18 +376,18 @@ export default function ShortsStudioView() {
               </label>
               <div className="shorts-actions youtube-actions">
                 <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
-                  {youtubeLoading && !aiLoading ? `Retrieving ${Math.round(aiProgress * 100)}%` : "Create Shorts"}
+                  {youtubeLoading ? "Loading…" : "Load YouTube Video"}
                 </button>
                 <button className="secondary-button ai-action-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeAIStudio}>
-                  {aiLoading ? `AI Auto Shorts ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
+                  ✨ AI Auto Shorts
                 </button>
               </div>
-              <span className="short-handle-note">Create Shorts retrieves the video first and uses the normal non-AI splitting/export pipeline. AI Auto Shorts is the only YouTube flow that sends the retrieved video to Gemini.</span>
+              <span className="short-handle-note">YouTube mode uses the official embedded player. Create timestamp-based Shorts and preview them here; MP4 export requires an uploaded local video. AI Auto Shorts is available for uploaded videos.</span>
               {error && <div className="alert">{error}</div>}
             </div>
           )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
-          {meta?.sourceType === "youtube" && meta.youtubeUrl && !sourceUrl && <div className="shorts-source-preview youtube-source-preview"><iframe src={youtubeEmbedUrl(meta.youtubeUrl)} title={meta.name || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div>}
+          {sourceMode === "youtube" && youtubeVideoId && <div className="shorts-source-preview youtube-source-preview"><div ref={youtubePlayerContainerRef} /></div>}
           {meta && <div className="shorts-source-meta">
             <Meta label="Source" value={meta.sourceType === "youtube" ? "YouTube" : meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
             <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "YouTube player"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "Streaming"} />
@@ -677,21 +690,28 @@ function formatBytes(bytes) {
 }
 
 
-function youtubeEmbedUrl(value, start = 0, end = null) {
+function extractYouTubeVideoId(value) {
   const raw = String(value || "").trim();
-  let id = "";
   try {
-    const url = new URL(raw);
+    const url = new URL(raw.startsWith("http") ? raw : "https://" + raw);
     const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    let id = "";
     if (host === "youtu.be") id = url.pathname.slice(1).split("/")[0];
     else if (host === "youtube.com" || host === "m.youtube.com") {
       if (url.pathname === "/watch") id = url.searchParams.get("v") || "";
       else if (url.pathname.startsWith("/shorts/")) id = url.pathname.split("/")[2] || "";
       else if (url.pathname.startsWith("/embed/")) id = url.pathname.split("/")[2] || "";
     }
-  } catch {}
-  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return "https://www.youtube.com/embed/";
+    return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+function youtubeEmbedUrl(value, start = 0, end = null) {
+  const id = extractYouTubeVideoId(value);
+  if (!id) return "https://www.youtube.com/embed/";
   const params = new URLSearchParams({ playsinline: "1", rel: "0", start: String(Math.max(0, Math.floor(Number(start) || 0))) });
   if (Number.isFinite(Number(end)) && Number(end) > Number(start)) params.set("end", String(Math.ceil(Number(end))));
-  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+  return "https://www.youtube.com/embed/" + id + "?" + params.toString();
 }
