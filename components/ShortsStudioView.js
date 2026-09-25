@@ -719,6 +719,16 @@ function extractYouTubeVideoId(value) {
   }
 }
 
+function youtubePlayerEmbedUrl(videoId) {
+  const params = new URLSearchParams({
+    enablejsapi: "1",
+    playsinline: "1",
+    rel: "0",
+    origin: typeof window !== "undefined" ? window.location.origin : "",
+  });
+  return "https://www.youtube.com/embed/" + encodeURIComponent(videoId) + "?" + params.toString();
+}
+
 function youtubeEmbedUrl(value, start = 0, end = null) {
   const id = extractYouTubeVideoId(value);
   if (!id) return "https://www.youtube.com/embed/";
