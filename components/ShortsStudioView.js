@@ -1,10 +1,28 @@
+          ) : (
+            <div className="shorts-upload youtube-source-box">
+              <label>YouTube URL
+                <input type="url" inputMode="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} />
+              </label>
+              <div className="shorts-actions youtube-actions">
+                <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
+                  {youtubeLoading && !aiLoading ? `Retrieving ${Math.round(aiProgress * 100)}%` : "Create Shorts"}
+                </button>
+                <button className="secondary-button ai-action-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeAIStudio}>
+                  {aiLoading ? `AI Auto Shorts ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
+                </button>
+              </div>
+              <span className="short-handle-note">Create Shorts retrieves the video first and uses the normal non-AI splitting/export pipeline. AI Auto Shorts is the only YouTube flow that sends the retrieved video to Gemini.</span>
+              {error && <div className="alert">{error}</div>}
+            </div>
+          )}
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRandomShorts, createRegularShorts, createAIShorts, DEFAULT_SHORT_SECONDS, formatTime, MAX_EDIT_SECONDS, MIN_EDIT_SECONDS, validateSourceDuration } from "@/lib/shorts-studio";
 import { exportShort } from "@/lib/shorts-export";
 import { saveFile } from "@/lib/download";
-import { analyzeVideoForCreator, analyzeYouTubeForCreator } from "@/lib/ai-shorts";
+import { analyzeVideoForCreator } from "@/lib/ai-shorts";
+import { retrieveYouTubeVideo } from "@/lib/youtube-retrieval";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
@@ -60,60 +78,132 @@ export default function ShortsStudioView() {
     video.onerror = () => { sourceRef.current = null; revokeSource(); setSourceUrl(""); setError("The browser could not read this video."); };
   }
 
+  async function loadSourceFile(file, sourceName, sourceType = "upload", youtubeSource = "") {
+    if (!file) throw new Error("No video source was returned.");
+    revokeSource();
+    const url = URL.createObjectURL(file);
+    sourceRef.current = file;
+    sourceUrlRef.current = url;
+    setSourceUrl(url);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.src = url;
+    return await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => {
+        const check = validateSourceDuration(video.duration);
+        if (!check.ok) {
+          sourceRef.current = null;
+          revokeSource();
+          setSourceUrl("");
+          reject(new Error(check.error));
+          return;
+        }
+        const nextMeta = {
+          name: sourceName || file.name || "Video source",
+          size: file.size,
+          duration: video.duration,
+          width: video.videoWidth,
+          height: video.videoHeight,
+          sourceType,
+          youtubeUrl: youtubeSource || "",
+        };
+        setMeta(nextMeta);
+        resolve(nextMeta);
+      };
+      video.onerror = () => {
+        sourceRef.current = null;
+        revokeSource();
+        setSourceUrl("");
+        reject(new Error("The browser could not read the retrieved video."));
+      };
+    });
+  }
+
   async function runYouTubeStudio() {
     const input = youtubeUrl.trim();
     if (!input) return setError("Paste a public YouTube URL first.");
-    let providerKeys = {};
-    try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
-    const ownGeminiKey = String(providerKeys.geminiApiKey || "").trim();
-    let geminiKey = ownGeminiKey;
-    if (!geminiKey) {
-      try {
-        const status = await fetch("/api/ai/gemini?action=status", { cache: "no-store" });
-        const data = await status.json();
-        if (!data.configured) return setError("No Gemini key is configured. Add your own key in AI Providers, or configure GEMINI_API_KEY in Vercel.");
-        setNotice("Using the app's Vercel Gemini key for YouTube analysis.");
-      } catch {
-        return setError("Could not check the app Gemini configuration.");
-      }
-    }
-    setYoutubeLoading(true); setAiLoading(false); setAiProgress(0); setError(""); setShorts([]); setAiResult(null);
+    setYoutubeLoading(true);
+    setAiLoading(false);
+    setAiProgress(0);
+    setError("");
+    setNotice("Retrieving the YouTube video…");
+    setShorts([]);
+    setAiResult(null);
     try {
-      const result = await analyzeYouTubeForCreator(input, geminiKey, {
-        maxClips: 8,
+      const result = await retrieveYouTubeVideo(input, {
         onProgress: ({ ratio = 0, stage }) => {
           setAiProgress(ratio);
-          setNotice(stage === "analyzing" ? "Gemini is analyzing the YouTube video and finding strong moments…" : "Finishing YouTube AI analysis…");
+          setNotice(stage === "retrieving" ? "Connecting to the YouTube media retriever…" : stage === "downloading" ? "Downloading the source video…" : "Preparing the video in CreatorFlow-AI…");
         },
       });
-      revokeSource();
-      sourceRef.current = null;
-      setSourceUrl("");
-      const duration = result.sourceDuration;
-      const generated = createAIShorts(duration, result.clips);
+      const nextMeta = await loadSourceFile(result.file, result.title, "youtube", result.youtubeUrl);
+      const length = Math.min(DEFAULT_SHORT_SECONDS, nextMeta.duration);
+      const generated = createRegularShorts(nextMeta.duration, length);
+      if (!generated.length) throw new Error("The retrieved YouTube video is too short to create Shorts.");
+      setShorts(generated);
+      setMode("regular");
+      setNotice(`YouTube video retrieved successfully. Created ${generated.length} editable Shorts. Export works like an uploaded video.`);
+    } catch (e) {
+      setError(e?.message || "YouTube video retrieval failed.");
+    } finally {
+      setYoutubeLoading(false);
+      setAiProgress(1);
+    }
+  }
+
+  async function runYouTubeAIStudio() {
+    const input = youtubeUrl.trim();
+    if (!input) return setError("Paste a public YouTube URL first.");
+    setYoutubeLoading(true);
+    setAiLoading(true);
+    setAiProgress(0);
+    setError("");
+    setNotice("Retrieving the YouTube source for AI Auto Shorts…");
+    setShorts([]);
+    setAiResult(null);
+    try {
+      const result = await retrieveYouTubeVideo(input, {
+        onProgress: ({ ratio = 0, stage }) => {
+          setAiProgress(ratio * 0.35);
+          setNotice(stage === "retrieving" ? "Connecting to the YouTube media retriever…" : stage === "downloading" ? "Downloading the source video…" : "Preparing the source for AI…");
+        },
+      });
+      const nextMeta = await loadSourceFile(result.file, result.title, "youtube", result.youtubeUrl);
+
+      let providerKeys = {};
+      try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
+      let geminiKey = String(providerKeys.geminiApiKey || "").trim();
+      if (!geminiKey) {
+        const status = await fetch("/api/ai/gemini?action=status", { cache: "no-store" });
+        const data = await status.json().catch(() => ({}));
+        if (!data.configured) throw new Error("AI Auto Shorts needs a Gemini key. Add your own key in AI Providers, or configure GEMINI_API_KEY in Vercel.");
+        setNotice("Source retrieved. Gemini is analyzing it for AI Auto Shorts…");
+      }
+
+      const ai = await analyzeVideoForCreator(result.file, geminiKey, nextMeta.duration, {
+        maxClips: 8,
+        onProgress: ({ ratio = 0, stage }) => {
+          setAiProgress(0.35 + ratio * 0.65);
+          setNotice(stage === "uploading" ? "Uploading the YouTube source to Gemini…" : stage === "processing" ? "Gemini is processing the source…" : stage === "analyzing" ? "Gemini is finding the strongest moments…" : "Finishing AI Auto Shorts…");
+        },
+      });
+      const generated = createAIShorts(nextMeta.duration, ai.clips);
       const withAI = generated.map((item) => ({
         ...item,
-        captions: result.captions.filter((caption) => caption.end > item.videoStart && caption.start < item.videoEnd),
-        hooks: result.hooks || [],
+        captions: ai.captions.filter((caption) => caption.end > item.videoStart && caption.start < item.videoEnd),
+        hooks: ai.hooks || [],
       }));
       if (!withAI.length) throw new Error("Gemini could not find usable Shorts in this YouTube video.");
-      setMeta({
-        name: result.title || "YouTube video",
-        size: 0,
-        duration,
-        width: null,
-        height: null,
-        sourceType: "youtube",
-        youtubeUrl: result.youtubeUrl,
-      });
       setShorts(withAI);
-      setAiResult(result);
+      setAiResult(ai);
       setMode("ai");
-      setNotice(`AI found ${withAI.length} Shorts in the YouTube video. Timeline edits are available; export requires an authorized local source video.`);
+      setNotice(`AI created ${withAI.length} Shorts from the retrieved YouTube source. You can edit and export them normally.`);
     } catch (e) {
-      setError(e?.message || "YouTube AI analysis failed.");
+      setError(e?.message || "YouTube AI Auto Shorts failed.");
     } finally {
-      setYoutubeLoading(false); setAiProgress(1);
+      setYoutubeLoading(false);
+      setAiLoading(false);
+      setAiProgress(1);
     }
   }
 
@@ -229,7 +319,6 @@ export default function ShortsStudioView() {
   }
 
   async function download(item) {
-    if (meta?.sourceType === "youtube") return setError("YouTube URL mode can analyze and create clip timestamps, but exporting/downloading the audiovisual content requires an authorized local video upload.");
     if (!sourceRef.current) return;
     setShorts((prev) => prev.map((x) => x.id === item.id ? { ...x, renderStatus: "rendering", renderProgress: 0, error: "" } : x));
     try {
@@ -275,7 +364,7 @@ export default function ShortsStudioView() {
         <div className="shorts-source-card">
           <div className="panel-head"><span>01</span><div><h2>Source video</h2><p className="muted">Upload one video from 30 seconds to 30 minutes.</p></div></div>
           <div className="source-mode-tabs">
-            <button className={sourceMode === "upload" ? "active" : ""} onClick={() => { setSourceMode("upload"); if (meta?.sourceType === "youtube") { setMeta(null); setShorts([]); setAiResult(null); setYoutubeUrl(""); setNotice(""); } }}>Upload Video</button>
+            <button className={sourceMode === "upload" ? "active" : ""} onClick={() => { setSourceMode("upload"); if (meta?.sourceType === "youtube") { revokeSource(); sourceRef.current = null; setSourceUrl(""); setMeta(null); setShorts([]); setAiResult(null); setYoutubeUrl(""); setNotice(""); } }}>Upload Video</button>
             <button className={sourceMode === "youtube" ? "active" : ""} onClick={() => setSourceMode("youtube")}>YouTube URL</button>
           </div>
           {sourceMode === "upload" ? (
@@ -297,7 +386,7 @@ export default function ShortsStudioView() {
             </div>
           )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
-          {meta?.sourceType === "youtube" && meta.youtubeUrl && <div className="shorts-source-preview youtube-source-preview"><iframe src={youtubeEmbedUrl(meta.youtubeUrl)} title={meta.name || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div>}
+          {meta?.sourceType === "youtube" && meta.youtubeUrl && !sourceUrl && <div className="shorts-source-preview youtube-source-preview"><iframe src={youtubeEmbedUrl(meta.youtubeUrl)} title={meta.name || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div>}
           {meta && <div className="shorts-source-meta">
             <Meta label="Source" value={meta.sourceType === "youtube" ? "YouTube" : meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
             <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "YouTube player"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "Streaming"} />
@@ -341,13 +430,13 @@ export default function ShortsStudioView() {
           </div>
           <div className="short-handle-note">Burned into the downloaded Short.</div>
           <div className="shorts-actions shorts-generate-actions">
-            <button className="secondary-button ai-action-button" disabled={!meta || meta?.sourceType === "youtube" || batch || aiLoading} onClick={runAIStudio}>
+            <button className="secondary-button ai-action-button" disabled={!meta || batch || aiLoading} onClick={runAIStudio}>
               {aiLoading ? `AI Analyzing ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
             </button>
-            <button className="primary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate()}>Generate Shorts</button>
-            <button className="secondary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate("random")}>Regenerate Random</button>
+            <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
+            <button className="secondary-button" disabled={!meta || batch} onClick={() => generate("random")}>Regenerate Random</button>
           </div>
-          <div className="short-disclaimer">Cropping or adding music does not guarantee copyright immunity. Use content you have rights to use. YouTube URL mode analyzes public videos with Gemini and does not download YouTube audiovisual content.</div>
+          <div className="short-disclaimer">Cropping or adding music does not guarantee copyright immunity. Use content you have rights to use. YouTube Create Shorts retrieves the source video without AI; Gemini is used only when AI Auto Shorts is explicitly selected.</div>
         </div>
       </div>
 
@@ -364,7 +453,7 @@ export default function ShortsStudioView() {
         <div className="shorts-actions">
           <button className="secondary-button" disabled={batch} onClick={() => setShorts((p) => p.map((x) => ({ ...x, selected: true })))}>Select All</button>
           <button className="secondary-button" disabled={batch} onClick={() => setShorts((p) => p.map((x) => ({ ...x, selected: false })))}>Clear Selection</button>
-          <button className="secondary-button" disabled={batch || meta?.sourceType === "youtube"} onClick={downloadSelected}>Download Selected</button>
+          <button className="secondary-button" disabled={batch} onClick={downloadSelected}>Download Selected</button>
         </div>
       </div>}
 
