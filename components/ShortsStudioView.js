@@ -292,7 +292,7 @@ export default function ShortsStudioView() {
               <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
                 {youtubeLoading ? `Analyzing ${Math.round(aiProgress * 100)}%` : "Analyze YouTube Video"}
               </button>
-              <span className="short-handle-note">YouTube mode uses Gemini's public-YouTube video understanding to find timestamps, captions and hooks. It does not download YouTube audiovisual content.</span>
+              <span className="short-handle-note">YouTube mode uses Gemini&apos;s public-YouTube video understanding to find timestamps, captions and hooks. It does not download YouTube audiovisual content.</span>
               {error && <div className="alert">{error}</div>}
             </div>
           )}
@@ -396,7 +396,7 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
     video.volume = Math.max(0, Math.min(1, item.originalVolume ?? 1));
     video.pause(); video.currentTime = item.videoStart; setPlaying(false);
     if (musicRef.current && item.music) { musicRef.current.pause(); musicRef.current.currentTime = item.music.start; }
-  }, [item.videoStart, item.videoEnd, item.music?.start]);
+  }, [item.videoStart, item.videoEnd, item.music, item.originalVolume]);
 
   function play() {
     const video = videoRef.current;
@@ -412,7 +412,7 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
     if (video) video.volume = Math.max(0, Math.min(1, Number(item.originalVolume) || 0));
     const audio = musicRef.current;
     if (audio && item.music) audio.volume = Math.max(0, Math.min(1, Number(item.music.volume) || 0));
-  }, [item.originalVolume, item.music?.volume]);
+  }, [item.originalVolume, item.music]);
 
   useEffect(() => {
     const audio = musicRef.current;
