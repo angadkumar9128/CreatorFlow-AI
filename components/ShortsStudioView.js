@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRandomShorts, createRegularShorts, createAIShorts, DEFAULT_SHORT_SECONDS, formatTime, MAX_EDIT_SECONDS, MIN_EDIT_SECONDS, validateSourceDuration } from "@/lib/shorts-studio";
 import { exportShort } from "@/lib/shorts-export";
 import { saveFile } from "@/lib/download";
-import { analyzeVideoForCreator } from "@/lib/ai-shorts";
+import { analyzeVideoForCreator, analyzeYouTubeForCreator } from "@/lib/ai-shorts";
 
 const musicState = (file, url, duration) => ({ file, url, duration, start: 0, mode: "trim", volume: 1 });
 
@@ -13,6 +13,8 @@ export default function ShortsStudioView() {
   const sourceUrlRef = useRef(null);
   const musicUrlsRef = useRef(new Set());
   const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceMode, setSourceMode] = useState("upload");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
   const [meta, setMeta] = useState(null);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("regular");
@@ -24,6 +26,7 @@ export default function ShortsStudioView() {
   const [handlePosition, setHandlePosition] = useState("bottom-right");
   const [handleOpacity, setHandleOpacity] = useState(0.9);
   const [aiLoading, setAiLoading] = useState(false);
+  const [youtubeLoading, setYoutubeLoading] = useState(false);
   const [aiProgress, setAiProgress] = useState(0);
   const [aiResult, setAiResult] = useState(null);
 
@@ -38,6 +41,7 @@ export default function ShortsStudioView() {
   }, [revokeSource]);
 
   function uploadSource(file) {
+    setSourceMode("upload");
     setError(""); setNotice(""); setShorts([]); setMeta(null); setAiResult(null);
     if (!file) return;
     if (!file.type.startsWith("video/")) return setError("Please upload a video file.");
@@ -54,6 +58,63 @@ export default function ShortsStudioView() {
       setMeta({ name: file.name, size: file.size, duration: video.duration, width: video.videoWidth, height: video.videoHeight });
     };
     video.onerror = () => { sourceRef.current = null; revokeSource(); setSourceUrl(""); setError("The browser could not read this video."); };
+  }
+
+  async function runYouTubeStudio() {
+    const input = youtubeUrl.trim();
+    if (!input) return setError("Paste a public YouTube URL first.");
+    let providerKeys = {};
+    try { providerKeys = JSON.parse(localStorage.getItem("creatorflow-provider-keys-v1") || "{}"); } catch {}
+    const ownGeminiKey = String(providerKeys.geminiApiKey || "").trim();
+    let geminiKey = ownGeminiKey;
+    if (!geminiKey) {
+      try {
+        const status = await fetch("/api/ai/gemini?action=status", { cache: "no-store" });
+        const data = await status.json();
+        if (!data.configured) return setError("No Gemini key is configured. Add your own key in AI Providers, or configure GEMINI_API_KEY in Vercel.");
+        setNotice("Using the app's Vercel Gemini key for YouTube analysis.");
+      } catch {
+        return setError("Could not check the app Gemini configuration.");
+      }
+    }
+    setYoutubeLoading(true); setAiLoading(false); setAiProgress(0); setError(""); setShorts([]); setAiResult(null);
+    try {
+      const result = await analyzeYouTubeForCreator(input, geminiKey, {
+        maxClips: 8,
+        onProgress: ({ ratio = 0, stage }) => {
+          setAiProgress(ratio);
+          setNotice(stage === "analyzing" ? "Gemini is analyzing the YouTube video and finding strong moments…" : "Finishing YouTube AI analysis…");
+        },
+      });
+      revokeSource();
+      sourceRef.current = null;
+      setSourceUrl("");
+      const duration = result.sourceDuration;
+      const generated = createAIShorts(duration, result.clips);
+      const withAI = generated.map((item) => ({
+        ...item,
+        captions: result.captions.filter((caption) => caption.end > item.videoStart && caption.start < item.videoEnd),
+        hooks: result.hooks || [],
+      }));
+      if (!withAI.length) throw new Error("Gemini could not find usable Shorts in this YouTube video.");
+      setMeta({
+        name: result.title || "YouTube video",
+        size: 0,
+        duration,
+        width: null,
+        height: null,
+        sourceType: "youtube",
+        youtubeUrl: result.youtubeUrl,
+      });
+      setShorts(withAI);
+      setAiResult(result);
+      setMode("ai");
+      setNotice(`AI found ${withAI.length} Shorts in the YouTube video. Timeline edits are available; export requires an authorized local source video.`);
+    } catch (e) {
+      setError(e?.message || "YouTube AI analysis failed.");
+    } finally {
+      setYoutubeLoading(false); setAiProgress(1);
+    }
   }
 
   async function runAIStudio() {
@@ -168,6 +229,7 @@ export default function ShortsStudioView() {
   }
 
   async function download(item) {
+    if (meta?.sourceType === "youtube") return setError("YouTube URL mode can analyze and create clip timestamps, but exporting/downloading the audiovisual content requires an authorized local video upload.");
     if (!sourceRef.current) return;
     setShorts((prev) => prev.map((x) => x.id === item.id ? { ...x, renderStatus: "rendering", renderProgress: 0, error: "" } : x));
     try {
@@ -212,15 +274,34 @@ export default function ShortsStudioView() {
       <div className="shorts-hero">
         <div className="shorts-source-card">
           <div className="panel-head"><span>01</span><div><h2>Source video</h2><p className="muted">Upload one video from 30 seconds to 30 minutes.</p></div></div>
-          <div className="shorts-upload">
-            <input type="file" accept="video/*" onChange={(e) => uploadSource(e.target.files?.[0])} />
-            {error && <div className="alert">{error}</div>}
+          <div className="source-mode-tabs">
+            <button className={sourceMode === "upload" ? "active" : ""} onClick={() => setSourceMode("upload")}>Upload Video</button>
+            <button className={sourceMode === "youtube" ? "active" : ""} onClick={() => setSourceMode("youtube")}>YouTube URL</button>
           </div>
+          {sourceMode === "upload" ? (
+            <div className="shorts-upload">
+              <input type="file" accept="video/*" onChange={(e) => uploadSource(e.target.files?.[0])} />
+              <span className="short-handle-note">30 seconds to 30 minutes. This source can be previewed, edited and exported in the browser.</span>
+              {error && <div className="alert">{error}</div>}
+            </div>
+          ) : (
+            <div className="shorts-upload youtube-source-box">
+              <label>Public YouTube URL
+                <input type="url" inputMode="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} />
+              </label>
+              <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
+                {youtubeLoading ? `Analyzing ${Math.round(aiProgress * 100)}%` : "Analyze YouTube Video"}
+              </button>
+              <span className="short-handle-note">YouTube mode uses Gemini's public-YouTube video understanding to find timestamps, captions and hooks. It does not download YouTube audiovisual content.</span>
+              {error && <div className="alert">{error}</div>}
+            </div>
+          )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
+          {meta?.sourceType === "youtube" && meta.youtubeUrl && <div className="shorts-source-preview youtube-source-preview"><iframe src={youtubeEmbedUrl(meta.youtubeUrl)} title={meta.name || "YouTube video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div>}
           {meta && <div className="shorts-source-meta">
-            <Meta label="File" value={meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
-            <Meta label="Resolution" value={`${meta.width}×${meta.height}`} /><Meta label="Size" value={formatBytes(meta.size)} />
-            <Meta label="FPS" value="Browser metadata unavailable" />
+            <Meta label="Source" value={meta.sourceType === "youtube" ? "YouTube" : meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
+            <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "YouTube player"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "Streaming"} />
+            <Meta label="FPS" value={meta.sourceType === "youtube" ? "YouTube player" : "Browser metadata unavailable"} />
           </div>}
         </div>
 
@@ -283,12 +364,12 @@ export default function ShortsStudioView() {
         <div className="shorts-actions">
           <button className="secondary-button" disabled={batch} onClick={() => setShorts((p) => p.map((x) => ({ ...x, selected: true })))}>Select All</button>
           <button className="secondary-button" disabled={batch} onClick={() => setShorts((p) => p.map((x) => ({ ...x, selected: false })))}>Clear Selection</button>
-          <button className="secondary-button" disabled={batch} onClick={downloadSelected}>Download Selected</button>
+          <button className="secondary-button" disabled={batch || meta?.sourceType === "youtube"} onClick={downloadSelected}>Download Selected</button>
         </div>
       </div>}
 
       <div className="shorts-list">
-        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} sourceDuration={meta?.duration || 0} expandEarlier={expandEarlier} creatorHandle={creatorHandle} handlePosition={handlePosition} handleOpacity={handleOpacity} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
+        {shorts.map((item) => <ShortCard key={item.id} item={item} sourceUrl={sourceUrl} sourceType={meta?.sourceType || "upload"} youtubeUrl={meta?.youtubeUrl || ""} sourceDuration={meta?.duration || 0} expandEarlier={expandEarlier} creatorHandle={creatorHandle} handlePosition={handlePosition} handleOpacity={handleOpacity} batch={batch} patch={patch} reset={reset} remove={removeShort} addMusic={addMusic} updateMusic={updateMusic} removeMusic={removeMusic} download={download} toggleSelect={(id) => setShorts((p) => p.map((x) => x.id === id ? { ...x, selected: !x.selected } : x))} />)}
       </div>
     </section>
   );
@@ -298,7 +379,7 @@ function Meta({ label, value }) {
   return <div className="shorts-meta-item"><span>{label}</span><strong title={value}>{value}</strong></div>;
 }
 
-function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHandle, handlePosition, handleOpacity, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
+function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, expandEarlier, creatorHandle, handlePosition, handleOpacity, batch, patch, reset, remove, addMusic, updateMusic, removeMusic, download, toggleSelect }) {
   const videoRef = useRef(null);
   const musicRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -412,11 +493,14 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
 
       <div className="short-card-main">
         <div className="short-card-preview">
-          <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
+          {sourceType === "youtube" && youtubeUrl
+            ? <iframe className="short-youtube-frame" src={youtubeEmbedUrl(youtubeUrl, item.videoStart, item.videoEnd)} title={`YouTube Short #${item.index}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen />
+            : <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />}
           {item.music && <audio ref={musicRef} src={item.music.url} preload="metadata" />}
           {activeCaption && <div className="short-preview-caption">{activeCaption}</div>}
           {creatorHandle.trim() && <div className={`short-creator-handle ${handlePosition}`} style={{ opacity: handleOpacity }}>{creatorHandle.trim()}</div>}
-          <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>
+          {sourceType !== "youtube" && <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>}
+          {sourceType === "youtube" && <a className="short-play-button" href={youtubeUrl} target="_blank" rel="noreferrer">Open on YouTube</a>}
         </div>
 
         <div className="short-editor">
@@ -488,9 +572,9 @@ function ShortCard({ item, sourceUrl, sourceDuration, expandEarlier, creatorHand
               {item.hashtags?.length > 0 && <div className="short-social-field"><small>Hashtags</small><p>{item.hashtags.join(" ")}</p></div>}
             </section>
           )}
-          {item.captions?.length > 0 && <div className="short-handle-note">AI on-video captions are previewed now and burned into the downloaded Short.</div>}
+          {item.captions?.length > 0 && <div className="short-handle-note">{sourceType === "youtube" ? "AI captions are available for this timestamp plan. Upload an authorized source video to burn them into an export." : "AI on-video captions are previewed now and burned into the downloaded Short."}</div>}
           {item.error && <div className="alert short-error">{item.error}</div>}
-          <div className="short-status"><span className="short-status-text">{item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
+          <div className="short-status"><span className="short-status-text">{sourceType === "youtube" && "YouTube analysis mode; export requires an authorized local source video."}{sourceType !== "youtube" && item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || sourceType === "youtube" || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{sourceType === "youtube" ? "Upload to Export" : item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
       </div>
     </article>
@@ -513,4 +597,24 @@ function formatBytes(bytes) {
   const units = ["B", "KB", "MB", "GB"];
   const exponent = Math.min(3, Math.floor(Math.log(bytes) / Math.log(1024)));
   return `${(bytes / 1024 ** exponent).toFixed(exponent ? 1 : 0)} ${units[exponent]}`;
+}
+
+
+function youtubeEmbedUrl(value, start = 0, end = null) {
+  const raw = String(value || "").trim();
+  let id = "";
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "youtu.be") id = url.pathname.slice(1).split("/")[0];
+    else if (host === "youtube.com" || host === "m.youtube.com") {
+      if (url.pathname === "/watch") id = url.searchParams.get("v") || "";
+      else if (url.pathname.startsWith("/shorts/")) id = url.pathname.split("/")[2] || "";
+      else if (url.pathname.startsWith("/embed/")) id = url.pathname.split("/")[2] || "";
+    }
+  } catch {}
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return "https://www.youtube.com/embed/";
+  const params = new URLSearchParams({ playsinline: "1", rel: "0", start: String(Math.max(0, Math.floor(Number(start) || 0))) });
+  if (Number.isFinite(Number(end)) && Number(end) > Number(start)) params.set("end", String(Math.ceil(Number(end))));
+  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
 }
