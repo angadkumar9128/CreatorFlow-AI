@@ -79,6 +79,7 @@ def download_youtube(url, workdir):
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
+        "verbose": bool(os.environ.get("YOUTUBE_DLP_VERBOSE")),
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
         "merge_output_format": "mp4",
         "ffmpeg_location": os.environ.get("FFMPEG_LOCATION", ""),
@@ -86,7 +87,14 @@ def download_youtube(url, workdir):
         "retries": 3,
         "fragment_retries": 3,
         "extractor_retries": 3,
-        "extractor_args": {"youtube": {"player_client": ["tv", "web_safari", "web_embedded"]}},
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "tv", "web_embedded"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": [os.environ.get("YOUTUBE_POT_PROVIDER_URL", "http://127.0.0.1:4416")],
+            },
+        },
     }
 
     # imageio-ffmpeg supplies an actual ffmpeg binary when present.
