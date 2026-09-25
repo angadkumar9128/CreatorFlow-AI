@@ -347,7 +347,7 @@ export default function ShortsStudioView() {
             <button className="primary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate()}>Generate Shorts</button>
             <button className="secondary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate("random")}>Regenerate Random</button>
           </div>
-          <div className="short-disclaimer">Cropping or adding music does not guarantee copyright immunity. Use content you have rights to use.</div>
+          <div className="short-disclaimer">Cropping or adding music does not guarantee copyright immunity. Use content you have rights to use. YouTube URL mode analyzes public videos with Gemini and does not download YouTube audiovisual content.</div>
         </div>
       </div>
 
@@ -486,7 +486,7 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
   return (
     <article className="short-card">
       <div className="short-card-top">
-        <div className="short-card-mobile-actions"><button className="secondary-button" disabled={batch} onClick={() => download(item)}>{item.renderStatus === "done" ? "Export again" : "Export"}</button></div>
+        <div className="short-card-mobile-actions"><button className="secondary-button" disabled={batch || sourceType === "youtube"} onClick={() => download(item)}>{sourceType === "youtube" ? "Upload to Export" : item.renderStatus === "done" ? "Export again" : "Export"}</button></div>
         <div className="short-title"><input type="checkbox" checked={!!item.selected} onChange={() => toggleSelect(item.id)} /><span className="short-number">{item.index}</span><div><strong>Short #{item.index}</strong><div className="muted">{formatTime(item.videoStart)} → {formatTime(item.videoEnd)} · {item.duration.toFixed(1)}s</div></div></div>
         <div className="shorts-actions"><button className="text-button" disabled={batch} onClick={() => reset(item)}>Reset</button><button className="text-button" disabled={batch} onClick={() => remove(item.id)}>Delete</button></div>
       </div>
