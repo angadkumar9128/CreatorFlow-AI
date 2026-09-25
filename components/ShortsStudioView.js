@@ -395,7 +395,6 @@ export default function ShortsStudioView() {
                 title="YouTube source video"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
-                referrerPolicy="strict-origin-when-cross-origin"
               />
             </div>
           )}
@@ -720,11 +719,13 @@ function extractYouTubeVideoId(value) {
 }
 
 function youtubePlayerEmbedUrl(videoId) {
+  // Keep the embed URL as close as possible to YouTube's standard iframe format.
+  // The IFrame API only needs enablejsapi=1 to attach to this existing iframe;
+  // origin is optional and can cause embeds to be rejected in some hosting/proxy contexts.
   const params = new URLSearchParams({
     enablejsapi: "1",
     playsinline: "1",
     rel: "0",
-    origin: typeof window !== "undefined" ? window.location.origin : "",
   });
   return "https://www.youtube.com/embed/" + encodeURIComponent(videoId) + "?" + params.toString();
 }
