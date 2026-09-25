@@ -1,20 +1,3 @@
-          ) : (
-            <div className="shorts-upload youtube-source-box">
-              <label>YouTube URL
-                <input type="url" inputMode="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} />
-              </label>
-              <div className="shorts-actions youtube-actions">
-                <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
-                  {youtubeLoading && !aiLoading ? `Retrieving ${Math.round(aiProgress * 100)}%` : "Create Shorts"}
-                </button>
-                <button className="secondary-button ai-action-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeAIStudio}>
-                  {aiLoading ? `AI Auto Shorts ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
-                </button>
-              </div>
-              <span className="short-handle-note">Create Shorts retrieves the video first and uses the normal non-AI splitting/export pipeline. AI Auto Shorts is the only YouTube flow that sends the retrieved video to Gemini.</span>
-              {error && <div className="alert">{error}</div>}
-            </div>
-          )}
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -375,13 +358,18 @@ export default function ShortsStudioView() {
             </div>
           ) : (
             <div className="shorts-upload youtube-source-box">
-              <label>Public YouTube URL
+              <label>YouTube URL
                 <input type="url" inputMode="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} />
               </label>
-              <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
-                {youtubeLoading ? `Analyzing ${Math.round(aiProgress * 100)}%` : "Analyze YouTube Video"}
-              </button>
-              <span className="short-handle-note">YouTube mode uses Gemini&apos;s public-YouTube video understanding to find timestamps, captions and hooks. It does not download YouTube audiovisual content.</span>
+              <div className="shorts-actions youtube-actions">
+                <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
+                  {youtubeLoading && !aiLoading ? `Retrieving ${Math.round(aiProgress * 100)}%` : "Create Shorts"}
+                </button>
+                <button className="secondary-button ai-action-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeAIStudio}>
+                  {aiLoading ? `AI Auto Shorts ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
+                </button>
+              </div>
+              <span className="short-handle-note">Create Shorts retrieves the video first and uses the normal non-AI splitting/export pipeline. AI Auto Shorts is the only YouTube flow that sends the retrieved video to Gemini.</span>
               {error && <div className="alert">{error}</div>}
             </div>
           )}
