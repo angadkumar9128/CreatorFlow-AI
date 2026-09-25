@@ -365,21 +365,10 @@ export default function ShortsStudioView() {
             </div>
           )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
-          {sourceMode === "youtube" && youtubeVideoId && !sourceUrl && (
-            <div className="shorts-source-preview youtube-source-preview">
-              <iframe
-                ref={youtubeIframeRef}
-                src={youtubePlayerEmbedUrl(youtubeVideoId)}
-                title="YouTube source video"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
-            </div>
-          )}
           {meta && <div className="shorts-source-meta">
             <Meta label="Source" value={meta.sourceType === "youtube" ? "YouTube" : meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
-            <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "YouTube player"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "Streaming"} />
-            <Meta label="FPS" value={meta.sourceType === "youtube" ? "YouTube player" : "Browser metadata unavailable"} />
+            <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "Unavailable"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "0 B"} />
+            <Meta label="FPS" value="Browser metadata unavailable" />
           </div>}
         </div>
 
@@ -647,7 +636,7 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
               {item.hashtags?.length > 0 && <div className="short-social-field"><small>Hashtags</small><p>{item.hashtags.join(" ")}</p></div>}
             </section>
           )}
-          {item.captions?.length > 0 && <div className="short-handle-note">{sourceType === "youtube" ? "AI captions are available for this timestamp plan. Upload an authorized source video to burn them into an export." : "AI on-video captions are previewed now and burned into the downloaded Short."}</div>}
+          {item.captions?.length > 0 && <div className="short-handle-note">{sourceType === "youtube" ? "AI captions are previewed now and burned into the downloaded Short." : "AI on-video captions are previewed now and burned into the downloaded Short."}</div>}
           {item.error && <div className="alert short-error">{item.error}</div>}
           <div className="short-status"><span className="short-status-text">{sourceType === "youtube" && "YouTube analysis mode; export requires an authorized local source video."}{sourceType !== "youtube" && item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
@@ -691,14 +680,4 @@ function extractYouTubeVideoId(value) {
   } catch {
     return "";
   }
-}
-
-
-
-function youtubeEmbedUrl(value, start = 0, end = null) {
-  const id = extractYouTubeVideoId(value);
-  if (!id) return "https://www.youtube.com/embed/";
-  const params = new URLSearchParams({ playsinline: "1", rel: "0", start: String(Math.max(0, Math.floor(Number(start) || 0))) });
-  if (Number.isFinite(Number(end)) && Number(end) > Number(start)) params.set("end", String(Math.ceil(Number(end))));
-  return "https://www.youtube.com/embed/" + id + "?" + params.toString();
 }
