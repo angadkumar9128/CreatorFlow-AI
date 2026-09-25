@@ -69,33 +69,24 @@ export default function ShortsStudioView() {
   }, [revokeSource]);
 
   useEffect(() => {
-    if (sourceMode !== "youtube" || !youtubeVideoId || !youtubePlayerContainerRef.current) return undefined;
+    if (sourceMode !== "youtube" || !youtubeVideoId || !youtubeIframeRef.current) return undefined;
     let cancelled = false;
-
-    const createPlayer = () => {
-      if (cancelled || !window.YT || !youtubePlayerContainerRef.current) return;
+    loadYouTubeIframeApi().then((YT) => {
+      if (cancelled || !youtubeIframeRef.current) return;
       youtubePlayerRef.current?.destroy?.();
-      youtubePlayerRef.current = new window.YT.Player(youtubePlayerContainerRef.current, {
-        width: "100%",
-        height: "100%",
-        videoId: youtubeVideoId,
-        playerVars: { playsinline: 1, rel: 0, origin: window.location.origin },
+      youtubePlayerRef.current = new YT.Player(youtubeIframeRef.current, {
         events: {
           onReady: (event) => {
             if (cancelled) return;
             const duration = Number(event.target.getDuration?.() || 0);
-            if (!duration) {
-              setError("YouTube did not expose the video duration yet. Press play once and try again.");
-              return;
-            }
+            if (!duration) return setError("YouTube did not expose the video duration yet. Press play once and try again.");
             const check = validateSourceDuration(duration);
             if (!check.ok) {
               setMeta(null);
               setShorts([]);
-              setError(check.error);
-              return;
+              return setError(check.error);
             }
-            const nextMeta = {
+            setMeta({
               name: "YouTube video (" + youtubeVideoId + ")",
               size: 0,
               duration,
@@ -103,47 +94,33 @@ export default function ShortsStudioView() {
               height: 0,
               sourceType: "youtube",
               youtubeUrl: youtubeUrl.trim(),
-            };
-            setMeta(nextMeta);
+            });
             setError("");
             const length = Math.min(DEFAULT_SHORT_SECONDS, duration);
             const generated = createRegularShorts(duration, length);
             setShorts(generated);
             setMode("regular");
-            setNotice("YouTube video loaded. Created " + generated.length + " timestamp-based Shorts. No video is downloaded.");
+            setNotice("YouTube video loaded. Created " + generated.length + " timestamp-based Shorts.");
           },
-          onError: () => {
-            if (!cancelled) setError("YouTube could not load this video in the embedded player.");
+          onError: (event) => {
+            if (cancelled) return;
+            const code = Number(event?.data);
+            if (code === 101 || code === 150) setError("This YouTube video does not allow embedded playback. Try another public video.");
+            else if (code === 100) setError("This YouTube video was removed, made private, or could not be found.");
+            else if (code === 153) setError("YouTube requires the page referrer for embedded playback. Reload the page and try again.");
+            else setError("YouTube could not load this video in the embedded player.");
           },
         },
       });
-    };
-
-    if (window.YT?.Player) {
-      createPlayer();
-      return () => { cancelled = true; youtubePlayerRef.current?.destroy?.(); youtubePlayerRef.current = null; };
-    }
-
-    const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
-    const script = existing || document.createElement("script");
-    const previousReady = window.onYouTubeIframeAPIReady;
-    if (!existing) {
-      script.src = "https://www.youtube.com/iframe_api";
-      script.async = true;
-      document.head.appendChild(script);
-    }
-    window.onYouTubeIframeAPIReady = () => {
-      previousReady?.();
-      createPlayer();
-    };
-
+    }).catch((e) => {
+      if (!cancelled) setError(e?.message || "Could not load the YouTube player.");
+    });
     return () => {
       cancelled = true;
-      if (window.onYouTubeIframeAPIReady === createPlayer) window.onYouTubeIframeAPIReady = previousReady;
       youtubePlayerRef.current?.destroy?.();
       youtubePlayerRef.current = null;
     };
-  }, [sourceMode, youtubeVideoId]);
+  }, [sourceMode, youtubeVideoId, youtubeUrl]);
 
   function uploadSource(file) {
     setSourceMode("upload");
@@ -410,7 +387,18 @@ export default function ShortsStudioView() {
             </div>
           )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
-          {sourceMode === "youtube" && youtubeVideoId && <div className="shorts-source-preview youtube-source-preview"><div ref={youtubePlayerContainerRef} /></div>}
+          {sourceMode === "youtube" && youtubeVideoId && (
+            <div className="shorts-source-preview youtube-source-preview">
+              <iframe
+                ref={youtubeIframeRef}
+                src={youtubePlayerEmbedUrl(youtubeVideoId)}
+                title="YouTube source video"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            </div>
+          )}
           {meta && <div className="shorts-source-meta">
             <Meta label="Source" value={meta.sourceType === "youtube" ? "YouTube" : meta.name} /><Meta label="Duration" value={formatTime(meta.duration)} />
             <Meta label="Resolution" value={meta.width && meta.height ? `${meta.width}×${meta.height}` : "YouTube player"} /><Meta label="Size" value={meta.size ? formatBytes(meta.size) : "Streaming"} />
