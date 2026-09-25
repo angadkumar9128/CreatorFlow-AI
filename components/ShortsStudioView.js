@@ -69,58 +69,9 @@ export default function ShortsStudioView() {
   }, [revokeSource]);
 
   useEffect(() => {
-    if (sourceMode !== "youtube" || !youtubeVideoId || !youtubeIframeRef.current) return undefined;
-    let cancelled = false;
-    loadYouTubeIframeApi().then((YT) => {
-      if (cancelled || !youtubeIframeRef.current) return;
-      youtubePlayerRef.current?.destroy?.();
-      youtubePlayerRef.current = new YT.Player(youtubeIframeRef.current, {
-        events: {
-          onReady: (event) => {
-            if (cancelled) return;
-            const duration = Number(event.target.getDuration?.() || 0);
-            if (!duration) return setError("YouTube did not expose the video duration yet. Press play once and try again.");
-            const check = validateSourceDuration(duration);
-            if (!check.ok) {
-              setMeta(null);
-              setShorts([]);
-              return setError(check.error);
-            }
-            setMeta({
-              name: "YouTube video (" + youtubeVideoId + ")",
-              size: 0,
-              duration,
-              width: 0,
-              height: 0,
-              sourceType: "youtube",
-              youtubeUrl: youtubeUrl.trim(),
-            });
-            setError("");
-            const length = Math.min(DEFAULT_SHORT_SECONDS, duration);
-            const generated = createRegularShorts(duration, length);
-            setShorts(generated);
-            setMode("regular");
-            setNotice("YouTube video loaded. Created " + generated.length + " timestamp-based Shorts.");
-          },
-          onError: (event) => {
-            if (cancelled) return;
-            const code = Number(event?.data);
-            if (code === 101 || code === 150) setError("This YouTube video does not allow embedded playback. Try another public video.");
-            else if (code === 100) setError("This YouTube video was removed, made private, or could not be found.");
-            else if (code === 153) setError("YouTube requires the page referrer for embedded playback. Reload the page and try again.");
-            else setError("YouTube could not load this video in the embedded player.");
-          },
-        },
-      });
-    }).catch((e) => {
-      if (!cancelled) setError(e?.message || "Could not load the YouTube player.");
-    });
-    return () => {
-      cancelled = true;
-      youtubePlayerRef.current?.destroy?.();
-      youtubePlayerRef.current = null;
-    };
-  }, [sourceMode, youtubeVideoId, youtubeUrl]);
+    if (sourceMode !== "youtube" || !youtubeVideoId || sourceUrl) return undefined;
+    return undefined;
+  }, [sourceMode, youtubeVideoId, sourceUrl]);
 
   function uploadSource(file) {
     setSourceMode("upload");
@@ -183,7 +134,7 @@ export default function ShortsStudioView() {
     });
   }
 
-  function runYouTubeStudio() {
+  async function runYouTubeStudio() {
     const input = youtubeUrl.trim();
     const videoId = extractYouTubeVideoId(input);
     if (!videoId) return setError("Paste a valid public YouTube URL first.");
@@ -192,16 +143,43 @@ export default function ShortsStudioView() {
     setAiLoading(false);
     setAiProgress(0);
     setError("");
-    setNotice("Loading the YouTube player…");
+    setNotice("Downloading the YouTube source with yt-dlp…");
     setShorts([]);
     setMeta(null);
     setAiResult(null);
     setYoutubeVideoId(videoId);
-    setYoutubeLoading(false);
+    try {
+      const res = await fetch("/api/youtube_download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ youtubeUrl: input }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.mediaUrl) {
+        throw new Error(data?.error || "Could not download this YouTube video.");
+      }
+      setNotice("YouTube source downloaded. Preparing it for Shorts Studio…");
+      const mediaRes = await fetch(data.mediaUrl);
+      if (!mediaRes.ok) throw new Error("The downloaded YouTube file could not be retrieved from storage.");
+      const blob = await mediaRes.blob();
+      const file = new File([blob], (data.title || "youtube-video").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 100) + ".mp4", { type: "video/mp4" });
+      const nextMeta = await loadSourceFile(file, file.name, "youtube", input);
+      const length = Math.min(DEFAULT_SHORT_SECONDS, nextMeta.duration);
+      const generated = createRegularShorts(nextMeta.duration, length);
+      setShorts(generated);
+      setMode("regular");
+      setNotice("YouTube video is now a local MP4 source. Editing and MP4 export use the same pipeline as uploaded videos.");
+    } catch (e) {
+      setError(e?.message || "YouTube download failed.");
+      setSourceUrl("");
+      sourceRef.current = null;
+    } finally {
+      setYoutubeLoading(false);
+    }
   }
 
   function runYouTubeAIStudio() {
-    setError("AI Auto Shorts is not available for YouTube iframe mode. Upload the video to use Gemini AI analysis and MP4 export.");
+    setError("First load the YouTube video. After it becomes a local source, use AI Auto Shorts to analyze it with Gemini.");
   }
   async function runAIStudio() {
     if (!sourceRef.current || !meta) return setError("Upload a valid source video first.");
@@ -376,18 +354,18 @@ export default function ShortsStudioView() {
               </label>
               <div className="shorts-actions youtube-actions">
                 <button className="primary-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeStudio}>
-                  {youtubeLoading ? "Loading…" : "Load YouTube Video"}
+                  {youtubeLoading ? "Downloading…" : "Load YouTube Video"}
                 </button>
                 <button className="secondary-button ai-action-button" disabled={youtubeLoading || batch || !youtubeUrl.trim()} onClick={runYouTubeAIStudio}>
                   ✨ AI Auto Shorts
                 </button>
               </div>
-              <span className="short-handle-note">YouTube mode uses the official embedded player. Create timestamp-based Shorts and preview them here; MP4 export requires an uploaded local video. AI Auto Shorts is available for uploaded videos.</span>
+              <span className="short-handle-note">Paste a YouTube URL to download an MP4 source with yt-dlp. The downloaded source then uses the normal Shorts Studio editor and MP4 export pipeline.</span>
               {error && <div className="alert">{error}</div>}
             </div>
           )}
           {sourceUrl && <video className="shorts-source-preview" src={sourceUrl} controls playsInline preload="metadata" />}
-          {sourceMode === "youtube" && youtubeVideoId && (
+          {sourceMode === "youtube" && youtubeVideoId && !sourceUrl && (
             <div className="shorts-source-preview youtube-source-preview">
               <iframe
                 ref={youtubeIframeRef}
@@ -586,21 +564,18 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
   return (
     <article className="short-card">
       <div className="short-card-top">
-        <div className="short-card-mobile-actions"><button className="secondary-button" disabled={batch || sourceType === "youtube"} onClick={() => download(item)}>{sourceType === "youtube" ? "Upload to Export" : item.renderStatus === "done" ? "Export again" : "Export"}</button></div>
+        <div className="short-card-mobile-actions"><button className="secondary-button" disabled={batch} onClick={() => download(item)}>{item.renderStatus === "done" ? "Export again" : "Export"}</button></div>
         <div className="short-title"><input type="checkbox" checked={!!item.selected} onChange={() => toggleSelect(item.id)} /><span className="short-number">{item.index}</span><div><strong>Short #{item.index}</strong><div className="muted">{formatTime(item.videoStart)} → {formatTime(item.videoEnd)} · {item.duration.toFixed(1)}s</div></div></div>
         <div className="shorts-actions"><button className="text-button" disabled={batch} onClick={() => reset(item)}>Reset</button><button className="text-button" disabled={batch} onClick={() => remove(item.id)}>Delete</button></div>
       </div>
 
       <div className="short-card-main">
         <div className="short-card-preview">
-          {sourceType === "youtube" && youtubeUrl
-            ? <iframe className="short-youtube-frame" src={youtubeEmbedUrl(youtubeUrl, item.videoStart, item.videoEnd)} title={`YouTube Short #${item.index}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen />
-            : <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />}
+          <video ref={videoRef} src={sourceUrl} muted={false} volume={item.originalVolume ?? 1} playsInline preload="metadata" onTimeUpdate={timeUpdate} />
           {item.music && <audio ref={musicRef} src={item.music.url} preload="metadata" />}
           {activeCaption && <div className="short-preview-caption">{activeCaption}</div>}
           {creatorHandle.trim() && <div className={`short-creator-handle ${handlePosition}`} style={{ opacity: handleOpacity }}>{creatorHandle.trim()}</div>}
-          {sourceType !== "youtube" && <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>}
-          {sourceType === "youtube" && <a className="short-play-button" href={youtubeUrl} target="_blank" rel="noreferrer">Open on YouTube</a>}
+          <button className="short-play-button" onClick={play}>{playing ? "Pause" : "Preview"}</button>
         </div>
 
         <div className="short-editor">
@@ -674,7 +649,7 @@ function ShortCard({ item, sourceUrl, sourceType, youtubeUrl, sourceDuration, ex
           )}
           {item.captions?.length > 0 && <div className="short-handle-note">{sourceType === "youtube" ? "AI captions are available for this timestamp plan. Upload an authorized source video to burn them into an export." : "AI on-video captions are previewed now and burned into the downloaded Short."}</div>}
           {item.error && <div className="alert short-error">{item.error}</div>}
-          <div className="short-status"><span className="short-status-text">{sourceType === "youtube" && "YouTube analysis mode; export requires an authorized local source video."}{sourceType !== "youtube" && item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || sourceType === "youtube" || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{sourceType === "youtube" ? "Upload to Export" : item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
+          <div className="short-status"><span className="short-status-text">{sourceType === "youtube" && "YouTube analysis mode; export requires an authorized local source video."}{sourceType !== "youtube" && item.renderStatus === "idle" && "Preview-only edits; final encoding happens on Download."}{item.renderStatus === "rendering" && `Rendering ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "converting" && `Converting MP4 ${Math.round(item.renderProgress * 100)}%`}{item.renderStatus === "done" && "MP4 ready"}{item.renderStatus === "error" && "Export failed"}</span><button className="primary-button" disabled={batch || item.renderStatus === "rendering" || item.renderStatus === "converting"} onClick={() => download(item)}>{item.renderStatus === "done" ? "Download Again" : "Download Short"}</button></div>
         </div>
       </div>
     </article>
@@ -718,17 +693,7 @@ function extractYouTubeVideoId(value) {
   }
 }
 
-function youtubePlayerEmbedUrl(videoId) {
-  // Keep the embed URL as close as possible to YouTube's standard iframe format.
-  // The IFrame API only needs enablejsapi=1 to attach to this existing iframe;
-  // origin is optional and can cause embeds to be rejected in some hosting/proxy contexts.
-  const params = new URLSearchParams({
-    enablejsapi: "1",
-    playsinline: "1",
-    rel: "0",
-  });
-  return "https://www.youtube.com/embed/" + encodeURIComponent(videoId) + "?" + params.toString();
-}
+
 
 function youtubeEmbedUrl(value, start = 0, end = null) {
   const id = extractYouTubeVideoId(value);
