@@ -88,6 +88,29 @@ export async function POST(request) {
       return json(data, res.status);
     }
 
+
+    if (action === "analyzeYoutube") {
+      const body = await request.json();
+      const youtubeUrl = String(body?.youtubeUrl || "").trim();
+      const prompt = String(body?.prompt || "");
+      if (!/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(youtubeUrl) || !prompt) {
+        return json({ ok: false, error: "Invalid YouTube URL or missing analysis prompt." }, 400);
+      }
+      const res = await fetch(
+        `${GEMINI_API_BASE}/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(key)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }, { file_data: { file_uri: youtubeUrl } }] }],
+            generationConfig: { temperature: 0.55, maxOutputTokens: 12000, responseMimeType: "application/json" },
+          }),
+        }
+      );
+      const data = await res.json();
+      return json(data, res.status);
+    }
+
     if (action === "analyze") {
       const body = await request.json();
       const fileRef = body?.fileRef;
