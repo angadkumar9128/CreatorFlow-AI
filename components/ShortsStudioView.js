@@ -275,7 +275,7 @@ export default function ShortsStudioView() {
         <div className="shorts-source-card">
           <div className="panel-head"><span>01</span><div><h2>Source video</h2><p className="muted">Upload one video from 30 seconds to 30 minutes.</p></div></div>
           <div className="source-mode-tabs">
-            <button className={sourceMode === "upload" ? "active" : ""} onClick={() => setSourceMode("upload")}>Upload Video</button>
+            <button className={sourceMode === "upload" ? "active" : ""} onClick={() => { setSourceMode("upload"); if (meta?.sourceType === "youtube") { setMeta(null); setShorts([]); setAiResult(null); setYoutubeUrl(""); setNotice(""); } }}>Upload Video</button>
             <button className={sourceMode === "youtube" ? "active" : ""} onClick={() => setSourceMode("youtube")}>YouTube URL</button>
           </div>
           {sourceMode === "upload" ? (
@@ -341,11 +341,11 @@ export default function ShortsStudioView() {
           </div>
           <div className="short-handle-note">Burned into the downloaded Short.</div>
           <div className="shorts-actions shorts-generate-actions">
-            <button className="secondary-button ai-action-button" disabled={!meta || batch || aiLoading} onClick={runAIStudio}>
+            <button className="secondary-button ai-action-button" disabled={!meta || meta?.sourceType === "youtube" || batch || aiLoading} onClick={runAIStudio}>
               {aiLoading ? `AI Analyzing ${Math.round(aiProgress * 100)}%` : "✨ AI Auto Shorts"}
             </button>
-            <button className="primary-button" disabled={!meta || batch} onClick={() => generate()}>Generate Shorts</button>
-            <button className="secondary-button" disabled={!meta || batch} onClick={() => generate("random")}>Regenerate Random</button>
+            <button className="primary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate()}>Generate Shorts</button>
+            <button className="secondary-button" disabled={!meta || meta?.sourceType === "youtube" || batch} onClick={() => generate("random")}>Regenerate Random</button>
           </div>
           <div className="short-disclaimer">Cropping or adding music does not guarantee copyright immunity. Use content you have rights to use.</div>
         </div>
