@@ -2,5 +2,12 @@ node_modules
 .next
 .env
 .env.local
+.env*.local
 .DS_Store
 *.log
+__pycache__/
+*.pyc
+.vercel
+cookies*.txt
+*cookies*.txt
+*.pem
